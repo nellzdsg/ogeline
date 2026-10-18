@@ -1,0 +1,13 @@
+{
+  "name": "ogeline",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "ОГЭлайн — бесплатный тренажёр для подготовки к ОГЭ",
+  "scripts": {
+    "crawl": "node tools/crawler/crawl.mjs",
+    "harvest": "node tools/crawler/harvest-answers.mjs",
+    "build": "node tools/build/build-site.mjs",
+    "serve": "node tools/build/serve.mjs"
+  }
+}

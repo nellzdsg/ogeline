@@ -1,0 +1,10 @@
+node_modules/
+
+# Собранный сайт (получается командой npm run build)
+web/data/
+web/media/
+
+# Диагностические выгрузки краулера
+data/*/debug-raw.html
+data/*/report-*.txt
+data/*/preview-*.txt
