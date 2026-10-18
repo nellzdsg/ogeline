@@ -1,5 +1,9 @@
 name: Публикация сайта
 
+# Один раз перед первым запуском нужно включить Pages:
+#   репозиторий -> Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+# Дальше каждый push в main пересобирает и публикует сайт автоматически.
+
 on:
   push:
     branches: [main]
@@ -33,8 +37,6 @@ jobs:
 
       - name: Настроить GitHub Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Загрузить сайт как артефакт
         uses: actions/upload-pages-artifact@v3
