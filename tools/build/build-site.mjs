@@ -60,11 +60,35 @@ async function main() {
 
   let mismatches = 0;
   let withoutAnswer = 0;
+  let skipped = 0;
   const byPrototype = {};
   const prepared = [];
   const seen = new Set();
 
+  // Тему публикуем только целиком: пока в ней есть задания без подтверждённого
+  // ответа, показывать её нельзя. Так незавершённая тема не попадает на сайт.
+  const allCounts = new Map();
+  for (const t of tasks) allCounts.set(t.theme, (allCounts.get(t.theme) || 0) + 1);
+  const opaque = new Map();
   for (const t of tasks) {
+    if (t.answer) opaque.set(t.theme, (opaque.get(t.theme) || 0) + 1);
+  }
+  const readyThemes = new Set(
+    [...allCounts.keys()].filter((code) => opaque.get(code) === allCounts.get(code)),
+  );
+  for (const code of allCounts.keys()) {
+    if (!readyThemes.has(code)) {
+      console.log(
+        `  ~ тема ${code} пока не публикуется: с ответом ${opaque.get(code) || 0} из ${allCounts.get(code)}`,
+      );
+    }
+  }
+
+  for (const t of tasks) {
+    if (!readyThemes.has(t.theme)) {
+      skipped++;
+      continue;
+    }
     if (!t.answer) withoutAnswer++;
 
     let analysis;
@@ -137,6 +161,7 @@ async function main() {
   console.log(`[${subject.key}] Собрано заданий: ${prepared.length}`);
   console.log(`  тем: ${themes.length}, картинок: ${mediaCount}`);
   console.log(`  без подтверждённого ответа: ${withoutAnswer}`);
+  console.log(`  скрыто заданий из незавершённых тем: ${skipped}`);
   console.log(`  расхождений с подтверждённым ответом: ${mismatches}`);
   console.log('  по прототипам:');
   for (const [proto, n] of Object.entries(byPrototype).sort((a, b) => b[1] - a[1])) {

@@ -9,10 +9,27 @@
 
 const MEDIA_RE = /\.(png|jpe?g|gif|svg|webp)$/i;
 
+// Банк кладёт картинки задания в папку .../questions/<guid>/, но имя файла внутри
+// папки бывает одно и то же у разных заданий (innerimg0.gif). Поэтому в локальное
+// имя добавляем владельца картинки, иначе разные рисунки схлопнутся в один файл.
+const QUESTION_RE = /\/questions\/([A-Za-z0-9]+)\//;
+
+/** Короткая устойчивая метка строки (FNV-1a) — когда папки задания в пути нет. */
+function shortHash(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
 export function localMediaName(src) {
   const clean = src.split('?')[0];
-  const base = clean.slice(clean.lastIndexOf('/') + 1);
-  return base.replace(/[^A-Za-z0-9_.-]/g, '_');
+  const base = clean.slice(clean.lastIndexOf('/') + 1).replace(/[^A-Za-z0-9_.-]/g, '_');
+  const owner = (QUESTION_RE.exec(clean) || [])[1];
+  const tag = owner ? owner.toUpperCase() : shortHash(clean);
+  return `${tag}_${base}`;
 }
 
 /**
