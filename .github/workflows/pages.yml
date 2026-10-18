@@ -1,0 +1,53 @@
+name: Публикация сайта
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Разрешения, необходимые для публикации на GitHub Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Одновременно выполняем только одну публикацию.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить код
+        uses: actions/checkout@v4
+
+      - name: Установить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Собрать сайт
+        run: node tools/build/build-site.mjs
+
+      - name: Настроить GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Загрузить сайт как артефакт
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Опубликовать
+        id: deployment
+        uses: actions/deploy-pages@v4
