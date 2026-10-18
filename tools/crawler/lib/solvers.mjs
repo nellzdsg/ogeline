@@ -6,6 +6,8 @@
 
 import { parseFragment, toExpr, toInlineText, extractMathBlocks } from './mathml.mjs';
 import { decodeEntities, stripTags } from './parse.mjs';
+import { transcribedFormula } from './transcripts.mjs';
+import { equationPoly, polyRoots } from '../../build/expr.mjs';
 
 const MAX_CANDIDATES = 8;
 const LETTER = 'A-Za-z\\u03b1-\\u03c9';
@@ -582,9 +584,34 @@ function solvePotentialEnergy(text) {
   return d.m * g * d.h;
 }
 
+/**
+ * Уравнение задания: само выражение, многочлен и его корни.
+ * Подходит для линейных, квадратных и сводящихся к ним уравнений.
+ * Если формула нарисована картинкой, берём распознанный вручную текст.
+ */
+export function equationInfo(task, expressions = formulaExpressions(task.stem)) {
+  const source = expressions.find((e) => e.includes('=')) || transcribedFormula(task);
+  if (!source) return null;
+  const poly = equationPoly(insertImplicitProducts(fixNumberText(source)));
+  if (!poly) return null;
+  const roots = polyRoots(poly);
+  if (!roots || !roots.length) return null;
+  return { source, poly, roots };
+}
+
+/**
+ * Порядок проверки корней: в условии сказано, какой именно корень нужен,
+ * поэтому первым проверяем именно его.
+ */
+export function rootsForAnswer(text, roots) {
+  if (roots.length < 2) return roots;
+  if (/больш|наибольш/i.test(text)) return [...roots].sort((a, b) => b - a);
+  if (/меньш|наименьш/i.test(text)) return [...roots].sort((a, b) => a - b);
+  return roots;
+}
+
 /** Главная точка входа: возможные ответы для задания с кратким ответом. */
-export function candidatesFor(task) {
-  const text = fixNumberText(plainText(task.stem).replace(/\s+/g, ' '));
+export function candidatesFor(task) {  const text = fixNumberText(plainText(task.stem).replace(/\s+/g, ' '));
   const expressions = formulaExpressions(task.stem);
   const values = [];
 
@@ -616,6 +643,12 @@ export function candidatesFor(task) {
   for (const solver of [solveKineticEnergy, solvePotentialEnergy]) {
     const value = solver(text);
     if (value != null) values.push(value);
+  }
+
+  // Уравнения: «Решите уравнение …», «Найдите корень уравнения …».
+  if (/решите уравнение|найдите корень уравнения|корн[ия] уравнения/i.test(text)) {
+    const info = equationInfo(task, expressions);
+    if (info) values.push(...rootsForAnswer(text, info.roots));
   }
 
   const out = [];

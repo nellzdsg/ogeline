@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe } from './prototypes.mjs';
 import { getSubject } from '../crawler/subjects.mjs';
+import { allTranscriptions } from '../crawler/lib/transcripts.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -45,7 +46,6 @@ async function copyMedia(srcDir, destDir) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const subject = getSubject(args.subject || 'math');
-
   const dataDir = path.join(ROOT, 'data', subject.key);
   const webDir = path.join(ROOT, 'web');
 
@@ -58,44 +58,52 @@ async function main() {
     .map((l) => JSON.parse(l));
   if (!tasks.length) throw new Error('Нет заданий — сначала запустите обход банка (npm run crawl).');
 
+  // Расшифровки картинок-формул должны указывать на реальные задания: опечатка
+  // в id иначе молча оставит задание без разбора.
+  const transcripts = allTranscriptions(subject.key);
+  const knownIds = new Set(tasks.map((t) => t.id));
+  const unknownIds = Object.keys(transcripts).filter((id) => !knownIds.has(id));
+  if (unknownIds.length) {
+    throw new Error(
+      `В transcripts.json есть неизвестные задания: ${unknownIds.join(', ')}. Поправьте id или удалите строку.`,
+    );
+  }
+  const usedTranscripts = tasks.filter((t) => transcripts[t.id]).length;
+  console.log(`  расшифровок картинок-формул: ${Object.keys(transcripts).length} (использовано ${usedTranscripts})`);
+
   let mismatches = 0;
-  let withoutAnswer = 0;
-  let skipped = 0;
+  let noAnswer = 0;
+  let noPrototype = 0;
   const byPrototype = {};
   const prepared = [];
   const seen = new Set();
 
-  // Тему публикуем только целиком: пока в ней есть задания без подтверждённого
-  // ответа, показывать её нельзя. Так незавершённая тема не попадает на сайт.
-  const allCounts = new Map();
-  for (const t of tasks) allCounts.set(t.theme, (allCounts.get(t.theme) || 0) + 1);
-  const opaque = new Map();
-  for (const t of tasks) {
-    if (t.answer) opaque.set(t.theme, (opaque.get(t.theme) || 0) + 1);
-  }
-  const readyThemes = new Set(
-    [...allCounts.keys()].filter((code) => opaque.get(code) === allCounts.get(code)),
-  );
-  for (const code of allCounts.keys()) {
-    if (!readyThemes.has(code)) {
-      console.log(
-        `  ~ тема ${code} пока не публикуется: с ответом ${opaque.get(code) || 0} из ${allCounts.get(code)}`,
-      );
-    }
-  }
+  // На сайт попадает только задание, которое можно проверить и объяснить:
+  // есть подтверждённый у ФИПИ ответ и разбор не «заглушка».
+  const progress = new Map();
+  const count = (code, field) => {
+    if (!progress.has(code)) progress.set(code, { total: 0, published: 0, noAnswer: 0, noPrototype: 0 });
+    progress.get(code)[field]++;
+  };
+  for (const t of tasks) count(t.theme, 'total');
 
   for (const t of tasks) {
-    if (!readyThemes.has(t.theme)) {
-      skipped++;
+    if (!t.answer) {
+      noAnswer++;
+      count(t.theme, 'noAnswer');
       continue;
     }
-    if (!t.answer) withoutAnswer++;
 
     let analysis;
     try {
       analysis = describe(t);
     } catch (err) {
       analysis = { prototype: 'error', hints: [], steps: [`Ошибка разбора: ${err.message}`], answer: null };
+    }
+    if (analysis.prototype === 'generic') {
+      noPrototype++;
+      count(t.theme, 'noPrototype');
+      continue;
     }
     byPrototype[analysis.prototype] = (byPrototype[analysis.prototype] || 0) + 1;
 
@@ -104,6 +112,7 @@ async function main() {
       console.warn(`  ! ${t.id}: программа даёт ${analysis.answer}, а подтверждённый ответ ${t.answer}`);
     }
 
+    count(t.theme, 'published');
     seen.add(t.theme);
     prepared.push({
       id: t.id,
@@ -118,6 +127,16 @@ async function main() {
       hints: analysis.hints,
       solution: analysis.steps,
     });
+  }
+
+  for (const [code, info] of progress) {
+    if (info.noAnswer || info.noPrototype) {
+      console.log(
+        `  ~ тема ${code}: готово ${info.published} из ${info.total}` +
+          (info.noAnswer ? `, без ответа ${info.noAnswer}` : '') +
+          (info.noPrototype ? `, без разбора ${info.noPrototype}` : ''),
+      );
+    }
   }
 
   // Оставляем только темы, для которых есть задания, сохраняя структуру дерева.
@@ -160,8 +179,8 @@ async function main() {
 
   console.log(`[${subject.key}] Собрано заданий: ${prepared.length}`);
   console.log(`  тем: ${themes.length}, картинок: ${mediaCount}`);
-  console.log(`  без подтверждённого ответа: ${withoutAnswer}`);
-  console.log(`  скрыто заданий из незавершённых тем: ${skipped}`);
+  console.log(`  без подтверждённого ответа: ${noAnswer}`);
+  console.log(`  без разбора: ${noPrototype}`);
   console.log(`  расхождений с подтверждённым ответом: ${mismatches}`);
   console.log('  по прототипам:');
   for (const [proto, n] of Object.entries(byPrototype).sort((a, b) => b[1] - a[1])) {

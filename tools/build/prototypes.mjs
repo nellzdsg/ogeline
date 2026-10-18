@@ -20,7 +20,18 @@ import {
   plural,
   powerForm,
   powerValue,
+  polyText,
+  polyDegree,
+  polyOf,
+  polyRoots,
+  polyInequality,
+  intervalAll,
+  intervalIntersect,
+  intervalEqual,
+  intervalText,
+  parseIntervalSet,
 } from './expr.mjs';
+import { transcribedFormula } from '../crawler/lib/transcripts.mjs';
 import {
   analyzeFormula,
   evalExpr,
@@ -33,6 +44,8 @@ import {
   fmtValue,
   kineticData,
   potentialData,
+  equationInfo,
+  rootsForAnswer,
 } from '../crawler/lib/solvers.mjs';
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -519,7 +532,7 @@ function valuesText(knowns, bases) {
 
 /** Ответ прототипа. */
 function pack(prototype, hints, steps, value) {
-  return { prototype, hints, steps, answer: fmt(value) };
+  return { prototype, hints, steps, answer: value == null ? null : fmt(value) };
 }
 
 /** Цепочка умножений с промежуточными результатами. */
@@ -1375,6 +1388,360 @@ function solveFormulaExplain(task, text) {
  * @param {object} task задание из tasks.ndjson
  * @returns {{prototype: string, hints: string[], steps: string[], answer: string|null}}
  */
+// --- тема «Уравнения и неравенства» -----------------------------------------
+
+/** Все надстрочные символы, которые встречаются в записи уравнения. */
+const SUP_CHARS = '⁰¹²³⁴⁵⁶⁷⁸⁹⁻';
+const SUB_CHARS = '₀₁₂₃₄₅₆₇₈₉';
+
+/** Показатель степени в надстрочном виде: −10 → «⁻¹⁰», 2 → «²». */
+function supDigits(n) {
+  const digits = String(Math.abs(n))
+    .split('')
+    .map((d) => SUP[Number(d)] ?? d)
+    .join('');
+  return (n < 0 ? '⁻' : '') + digits;
+}
+
+/**
+ * Уравнение в читаемом виде: «7 ((x)^(2)) = 42 x» → «7x² = 42x».
+ * Отдельно разбираем минусы: унарный пишется слитно («−7x»), бинарный — с
+ * пробелами («x − 7»).
+ */
+function equationText(source) {
+  const plain = tidy(String(source).replace(/\^\((-?\d+)\)/g, '^$1'));
+  const valueChars = `A-Za-z\\u03b1-\\u03c90-9)${SUP_CHARS}${SUB_CHARS}`;
+  return plain
+    .replace(/\^(-?\d+)/g, (_, d) => supDigits(Number(d)))
+    .replace(new RegExp(`\\(([A-Za-z\\u03b1-\\u03c9][A-Za-z0-9_${SUP_CHARS}${SUB_CHARS}]*)\\)`, 'g'), '$1')
+    .replace(/·(?=[A-Za-z\u03b1-\u03c9(])/g, '')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s+\)/g, ')')
+    .replace(/\s*([+=])\s*/g, ' $1 ')
+    .replace(new RegExp(`([${valueChars}])\\s*-\\s*`, 'g'), '$1@')
+    .replace(/([\s=+(])-\s*/g, '$1−')
+    .replace(/^-\s*/, '−')
+    .replace(/@/g, ' − ')
+    .replace(/-/g, '−')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Разбор уравнения: в тексте подсказок и решения минус — типографский. */
+function packEquation(prototype, hints, steps, value) {
+  return pack(prototype, hints.map(minus), steps.map(minus), value);
+}
+
+/**
+ * Уравнение: линейное или квадратное (в том числе сводящееся к ним раскрытием
+ * скобок и приведением подобных). Формула может быть нарисована картинкой —
+ * тогда берётся распознанный текст.
+ */
+function solveEquationExplain(task, text) {
+  if (!/решите уравнение|найдите корень уравнения|корн[ия] уравнения/i.test(text)) return null;
+  const info = equationInfo(task, formulas(task.stem));
+  if (!info) return null;
+
+  const coeffs = info.poly;
+  const [a2, a1, a0] = coeffs;
+  const degree = polyDegree(coeffs);
+  if (degree < 1) return null;
+
+  const roots = info.roots;
+  const answer = rootsForAnswer(text, roots)[0];
+  const wants = /больш|наибольш/i.test(text) ? 'больший' : /меньш|наименьш/i.test(text) ? 'меньший' : null;
+  const eq = equationText(info.source);
+  const rootsText = roots.map((r) => fmt(r)).join(' и ');
+  const wantLine = wants ? `В условии нужен ${wants} корень: ${fmt(answer)}.` : `Ответ: ${fmt(answer)}.`;
+  const brackets = info.source.includes('(');
+  const openBrackets = 'Раскроем скобки: умножим число перед скобкой на каждое слагаемое внутри.';
+
+  if (degree === 1) {
+    const value = -a0 / a1;
+    const steps = [`Решим уравнение ${eq}.`];
+    if (brackets) steps.push(openBrackets);
+    steps.push('Слагаемые с x соберём в левой части, числа — в правой и приведём подобные.');
+    steps.push(`Получим уравнение ${polyText(coeffs)} = 0.`);
+    if (Math.abs(a1) === 1) {
+      steps.push(`Значит, x = ${fmt(value)}.`);
+    } else {
+      steps.push(`Перенесём число в правую часть: ${polyText([0, a1, 0])} = ${fmt(-a0)}.`);
+      const rhsText = -a0 < 0 ? `(${fmt(-a0)})` : fmt(-a0);
+      const divisor = a1 < 0 ? `(${fmt(a1)})` : fmt(a1);
+      steps.push(`Разделим обе части на ${fmt(a1)}: x = ${rhsText} : ${divisor} = ${fmt(value)}.`);
+    }
+    steps.push(`Ответ: ${fmt(value)}.`);
+
+    const hints = [
+      brackets
+        ? 'Это линейное уравнение. Сначала раскройте скобки, потом соберите слагаемые с x в одной части, а числа — в другой.'
+        : 'Это линейное уравнение. Соберите слагаемые с x в одной части, а числа — в другой.',
+      `После приведения подобных получится ${polyText(coeffs)} = 0.`,
+      `Отсюда x = ${fmt(value)}. Запишите это число в бланк.`,
+    ];
+    return packEquation('equation-linear', hints, steps, value);
+  }
+
+  if (!a1) {
+    // x² = c — два корня, противоположных по знаку
+    const c = -a0 / a2;
+    const root = Math.sqrt(c);
+    const steps = [
+      `Решим уравнение ${eq}.`,
+      `Перенесём число в правую часть: ${a2 === 1 ? '' : fmt(a2)}x² = ${fmt(c)}.`,
+      `Извлечём квадратный корень: x = ${fmt(root)} или x = ${fmt(-root)}.`,
+      wantLine,
+      `Ответ: ${fmt(answer)}.`,
+    ];
+    const hints = [
+      'Перенесите число в правую часть — получится уравнение вида x² = a.',
+      `Из уравнения x² = ${fmt(c)} получаются два корня: ${fmt(root)} и ${fmt(-root)}.`,
+      wants ? `В ответ нужно записать ${wants} из них.` : `Запишите оба корня.`,
+    ];
+    return packEquation('equation-quadratic', hints, steps, answer);
+  }
+
+  if (!a0) {
+    // x·(ax + b) = 0 — один корень нуль, второй находится из линейного
+    const other = -a1 / a2;
+    const steps = [
+      `Решим уравнение ${eq}.`,
+      `Перенесём все слагаемые в одну часть: ${polyText(coeffs)} = 0.`,
+      `Вынесем x за скобки: x(${polyText([0, a2, a1])}) = 0.`,
+      `Произведение равно нулю, когда один из множителей равен нулю: x = 0 или x = ${fmt(other)}.`,
+      wantLine,
+      `Ответ: ${fmt(answer)}.`,
+    ];
+    const hints = [
+      'Перенесите все слагаемые в одну часть уравнения, чтобы справа остался нуль.',
+      `В левой части можно вынести x за скобки: получится x(${polyText([0, a2, a1])}) = 0.`,
+      wants ? `Произведение равно нулю при x = 0 и при x = ${fmt(other)}. Выберите ${wants}.` : `Уравнение даёт два корня: 0 и ${fmt(other)}.`,
+    ];
+    return packEquation('equation-quadratic', hints, steps, answer);
+  }
+
+  // Полное квадратное уравнение: считаем дискриминант.
+  const d = a1 * a1 - 4 * a2 * a0;
+  const sq = d > 0 ? Math.sqrt(d) : 0;
+  const steps = [
+    `Решим уравнение ${eq}.`,
+    'Это квадратное уравнение приведём к виду ax² + bx + c = 0.',
+    `Коэффициенты: a = ${fmt(a2)}, b = ${fmt(a1)}, c = ${fmt(a0)}.`,
+    `Дискриминант: D = b² − 4ac = (${fmt(a1)})² − 4·${fmt(a2)}·${fmt(a0)} = ${fmt(d)}.`,
+  ];
+  if (d > 0) {
+    steps.push(
+      `Корни: x = (−b ± √D)/(2a) = (${fmt(-a1)} ± ${fmt(sq)})/${fmt(2 * a2)}, то есть x = ${rootsText}.`,
+    );
+  } else if (Math.abs(d) < 1e-9) {
+    steps.push(`Так как D = 0, корень один: x = ${fmt(answer)}.`);
+  }
+  steps.push(wantLine, `Ответ: ${fmt(answer)}.`);
+
+  const hints = [
+    'Это квадратное уравнение. Запишите его в виде ax² + bx + c = 0 и выпишите коэффициенты.',
+    `Дискриминант D = b² − 4ac = (${fmt(a1)})² − 4·${fmt(a2)}·${fmt(a0)} = ${fmt(d)}.`,
+    `Корни находят по формуле x = (−b ± √D)/(2a): получаются ${rootsText}.${wants ? ` В ответ запишите ${wants}.` : ''}`,
+  ];
+  return packEquation('equation-quadratic', hints, steps, answer);
+}
+
+// --- тема «Уравнения и неравенства»: неравенства ------------------------------
+
+const OP_TEXT = { '>': '>', '<': '<', '>=': '≥', '<=': '≤' };
+
+/** Знаки неравенств наоборот — при умножении на отрицательное число. */
+const FLIP_OP = { '>': '<', '<': '>', '>=': '<=', '<=': '>=' };
+
+/** Условие-неравенство (одно или система): многочлен и знак для каждой части. */
+function inequalityConditions(task) {
+  const raw = formulas(task.stem).find((e) => /(<=|>=|<|>)/.test(e)) || transcribedFormula(task);
+  if (!raw) return null;
+  // В банке переменная иногда записана кириллической «х».
+  const source = String(raw).replace(/[хХ]/g, 'x');
+
+  const parts = source
+    .replace(/[{}]/g, ' ')
+    .split(/\s*;\s*|,(?!\d)/)
+    .map((s) => s.replace(/\s+/g, ' ').replace(/\.+$/, '').trim())
+    .filter(Boolean);
+  if (!parts.length) return null;
+
+  const items = [];
+  for (const part of parts) {
+    const m = /^(.*?)(<=|>=|<|>)(.*)$/.exec(part);
+    if (!m) return null;
+    const left = polyOf(parseAlgebra(insertImplicitProducts(fixNumberText(m[1]))));
+    const right = polyOf(parseAlgebra(insertImplicitProducts(fixNumberText(m[3]))));
+    if (!left || !right) return null;
+    if (polyDegree(left) < 1 && polyDegree(right) < 1) return null;
+    items.push({ op: m[2], coeffs: left.map((c, i) => c - right[i]), text: part });
+  }
+  return { source, items };
+}
+
+/** Где выполняется неравенство — по направлению ветвей и знаку. */
+function whereText(quadratic, op) {
+  const outside = op === '>' || op === '>=';
+  const up = quadratic > 0;
+  const between = up ? !outside : outside;
+  const strict = op === '>' || op === '<';
+  return `${between ? 'между корнями' : 'вне промежутка между корнями'}${strict ? '' : ' (включая сами корни)'}`;
+}
+
+/** Пошаговое объяснение одного неравенства. */
+function inequalityItemSteps(it) {
+  const [a2, a1, a0] = it.coeffs;
+  const canonical = `${polyText(it.coeffs)} ${OP_TEXT[it.op]} 0`;
+  const partial = polyInequality(it.coeffs, it.op);
+  const roots = polyRoots(it.coeffs) || [];
+  const lines = [];
+
+  if (Math.abs(a2) < 1e-12) {
+    lines.push(`Приведём неравенство к виду ${canonical}: слагаемые с x — в одной части, числа — в другой.`);
+    lines.push(`Получаем x ${OP_TEXT[a1 > 0 ? it.op : FLIP_OP[it.op]]} ${fmtValue(-a0 / a1)}, то есть x ∈ ${intervalText(partial)}.`);
+    return lines;
+  }
+
+  if (roots.length === 2) {
+    lines.push(`Левая часть обращается в нуль при x = ${fmtValue(roots[0])} и x = ${fmtValue(roots[1])}.`);
+    lines.push(`Ветви параболы y = ${polyText(it.coeffs)} направлены ${a2 > 0 ? 'вверх' : 'вниз'}.`);
+    lines.push(`Неравенство ${canonical} выполняется ${whereText(a2, it.op)}.`);
+    lines.push(`Значит, x ∈ ${intervalText(partial)}.`);
+    return lines;
+  }
+
+  if (roots.length === 1) {
+    lines.push(`Левая часть ${polyText(it.coeffs)} обращается в нуль только при x = ${fmtValue(roots[0])}.`);
+    lines.push(`Ветви параболы направлены ${a2 > 0 ? 'вверх' : 'вниз'}, поэтому решение: x ∈ ${intervalText(partial)}.`);
+    return lines;
+  }
+
+  lines.push(`Левая часть ${polyText(it.coeffs)} не обращается в нуль и всегда ${a2 > 0 ? 'положительна' : 'отрицательна'}.`);
+  lines.push(`Значит, x ∈ ${intervalText(partial)}.`);
+  return lines;
+}
+
+/**
+ * «Укажите решение неравенства …» и «Укажите решение системы неравенств …».
+ * Условие может быть картинкой — тогда берётся распознанный вручную текст.
+ */
+function solveInequalityExplain(task, text) {
+  if (!/неравенств/i.test(text)) return null;
+  if (/решение которого изображено на рисунке/i.test(text)) return null; // отдельный разбор
+  const cond = inequalityConditions(task);
+  if (!cond) return null;
+
+  const { items } = cond;
+  const system = items.length > 1;
+
+  let set = intervalAll();
+  for (const it of items) set = intervalIntersect(set, polyInequality(it.coeffs, it.op));
+  if (!set) return null;
+  const solutionText = intervalText(set);
+
+  const lines = [];
+  if (system) lines.push('Решим каждое неравенство системы по отдельности.');
+  for (const it of items) {
+    if (system) lines.push(`Неравенство ${equationText(it.text)}:`);
+    lines.push(...inequalityItemSteps(it));
+  }
+  if (system) lines.push(`Решения системы — общая часть: x ∈ ${solutionText}.`);
+
+  // Ищем вариант ответа с таким же множеством решений.
+  const options = (task.options || []).filter((o) => o && o.html);
+  const matched = options
+    .map((o, i) => {
+      const parsedSet = parseIntervalSet(plainText(o.html).replace(/\s+/g, ' ').trim());
+      return parsedSet && intervalEqual(parsedSet, set) ? i + 1 : null;
+    })
+    .filter(Boolean);
+
+  let answer = null;
+  if (matched.length === 1) {
+    answer = matched[0];
+    lines.push(`Такое множество решений записано в варианте ${answer}.`);
+  } else if (task.answer) {
+    lines.push(`Среди вариантов нужно выбрать промежуток ${solutionText} — это вариант ${task.answer}.`);
+  }
+
+  lines.push(`Ответ: ${answer ?? task.answer ?? '—'}.`);
+
+  const rootsText = items
+    .map((it) => {
+      const roots = polyRoots(it.coeffs) || [];
+      return roots.length ? roots.map((r) => fmtValue(r)).join(' и ') : null;
+    })
+    .filter(Boolean)
+    .join('; ');
+
+  const hints = [
+    system
+      ? 'Решите каждое неравенство системы отдельно, а потом найдите общую часть решений.'
+      : 'Приведите неравенство к виду «многочлен ⋛ 0» и найдите нули левой части.',
+    rootsText
+      ? `Нули левых частей: ${rootsText}. Отметьте их на координатной прямой и определите знак между нулями.`
+      : 'Отметьте нули на координатной прямой и посмотрите, где левая часть имеет нужный знак.',
+    `Решение: x ∈ ${solutionText}.${answer ? ` Это вариант ${answer}.` : task.answer ? ` Это вариант ${task.answer}.` : ''}`,
+  ];
+
+  // Когда варианты нарисованы картинками, номер варианта берётся из
+  // подтверждённого ответа: сама программа его не выводит.
+  const optionNumber = Number(answer ?? task.answer);
+  return pack('inequality-set', hints, lines, Number.isFinite(optionNumber) ? optionNumber : null);
+}
+
+/**
+ * «Укажите неравенство, решение которого изображено на рисунке.»
+ * Варианты — формулы, поэтому решаем каждое неравенство и сравниваем с рисунком.
+ */
+function solveInequalityByFigure(task, text) {
+  if (!/решение которого изображено на рисунке/i.test(text)) return null;
+  const options = (task.options || []).filter((o) => o && o.html);
+  if (!options.length) return null;
+
+  const solved = options.map((o) => {
+    const expr = formulas(o.html).find((e) => /(<=|>=|<|>)/.test(e));
+    if (!expr) return null;
+    const source = String(expr).replace(/[хХ]/g, 'x');
+    const m = /^(.*?)(<=|>=|<|>)(.*)$/.exec(source);
+    if (!m) return null;
+    const left = polyOf(parseAlgebra(insertImplicitProducts(fixNumberText(m[1]))));
+    const right = polyOf(parseAlgebra(insertImplicitProducts(fixNumberText(m[3]))));
+    if (!left || !right) return null;
+    const coeffs = left.map((c, i) => c - right[i]);
+    return { expr: m[0], set: polyInequality(coeffs, m[2]), coeffs, op: m[2] };
+  });
+  if (solved.some((s) => !s)) return null;
+
+  const correct = Number(task.answer);
+  const chosen = correct >= 1 && correct <= solved.length ? solved[correct - 1] : null;
+
+  const lines = ['Решим каждое неравенство из вариантов.'];
+  solved.forEach((s, i) => {
+    lines.push(`${i + 1}) ${inequalityLine(s.coeffs, s.op)} — решение x ∈ ${intervalText(s.set)}.`);
+  });
+  if (chosen) {
+    lines.push(`На рисунке изображён промежуток ${intervalText(chosen.set)} — это вариант ${correct}.`);
+  }
+  lines.push(`Ответ: ${correct}.`);
+
+  const hints = [
+    'Решите каждое неравенство из вариантов и запишите его множество решений.',
+    solved.map((s, i) => `${i + 1}) ${intervalText(s.set)}`).join('; '),
+    chosen
+      ? `На рисунке изображён промежуток ${intervalText(chosen.set)} — вариант ${correct}.`
+      : 'Сравните полученные промежутки с рисунком.',
+  ];
+
+  return pack('inequality-figure', hints, lines, null);
+}
+
+/** «2x² − 8x < 0» — неравенство в читаемом виде. */
+function inequalityLine(coeffs, op) {
+  return `${polyText(coeffs)} ${OP_TEXT[op]} 0`;
+}
+
 export function describe(task) {
   const text = fixNumberText(plainText(task.stem));
   const kind = task.kind;
@@ -1418,6 +1785,10 @@ export function describe(task) {
       if (formula) return formula;
     }
 
+    // Уравнения и неравенства: «Решите уравнение…», «Найдите корень уравнения…».
+    const equation = solveEquationExplain(task, text);
+    if (equation) return equation;
+
     if (expr) {
       const solved =
         solveRadical(expr, knowns, literals) || solveDegree(expr, knowns, literals) || solveCompute(expr, knowns, literals);
@@ -1426,6 +1797,10 @@ export function describe(task) {
   }
 
   if (kind === 'choice') {
+    // Неравенства и системы неравенств (тема «Уравнения и неравенства»).
+    const inequality = solveInequalityByFigure(task, text) || solveInequalityExplain(task, text);
+    if (inequality) return inequality;
+
     const solved =
       solveBetweenTwo(text, task) ||
       solveSegment(text, task) ||

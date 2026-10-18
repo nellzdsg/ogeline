@@ -129,7 +129,8 @@ export function toExpr(node) {
     case 'mo': {
       const raw = textOf(node).trim();
       const op = OP_MAP[raw] ?? raw;
-      return /^[+\-*/^()<>=$|,]$/.test(op) ? op : '';
+      // Знаки сравнения бывают двузначными («>=», «<=»).
+      return /^([+\-*/^()<>=$|,]|<=|>=|!=)$/.test(op) ? op : '';
     }
 
     case 'mfrac':

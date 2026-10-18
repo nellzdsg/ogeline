@@ -554,4 +554,268 @@ export function powerBase(base) {
   return /^\d/.test(base) ? String(Number(base)) : base;
 }
 
-export { gcd, lcm, plural };
+// --- многочлены от одной переменной (уравнения и неравенства) ----------------
+
+const ZERO_POLY = [0, 0, 0];
+
+/** Убирает вычислительный шум: 1e-17 → 0. */
+function snap(c) {
+  if (Math.abs(c) < 1e-12) return 0;
+  return c;
+}
+
+function polyAdd(l, r, sign) {
+  return l.map((c, i) => snap(c + sign * r[i]));
+}
+
+/**
+ * Произведение. Коэффициенты хранятся от старшей степени к младшей, поэтому
+ * индексы складываются «наоборот»: степень слагаемого = 2 − индекс.
+ */
+function polyMul(l, r) {
+  const out = [0, 0, 0];
+  for (let i = 0; i < 3; i++) {
+    if (!l[i]) continue;
+    for (let j = 0; j < 3; j++) {
+      if (!r[j]) continue;
+      const k = i + j - 2;
+      if (k < 0) return null;
+      out[k] += l[i] * r[j];
+    }
+  }
+  return out.map(snap);
+}
+
+/**
+ * Многочлен степени не выше второй: [старший, средний, свободный] по степеням
+ * переменной name. null, если выражение не многочлен (корни, дроби с x,
+ * неизвестные буквы, степени больше второй).
+ */
+export function polyOf(node, name = 'x') {
+  if (!node) return null;
+  switch (node.type) {
+    case 'num':
+      return [0, 0, snap(node.value)];
+    case 'unknown':
+      return node.raw === name ? [0, 1, 0] : null;
+    case 'neg': {
+      const p = polyOf(node.arg, name);
+      return p && p.map((c) => snap(-c));
+    }
+    case 'pow': {
+      const base = polyOf(node.base, name);
+      const exp = evalNode(node.exp);
+      if (!base || !Number.isInteger(exp) || exp < 0 || exp > 2) return null;
+      let out = [0, 0, 1];
+      for (let i = 0; i < exp; i++) {
+        out = polyMul(out, base);
+        if (!out) return null;
+      }
+      return out;
+    }
+    case 'bin': {
+      const l = polyOf(node.l, name);
+      const r = polyOf(node.r, name);
+      if (!l || !r) return null;
+      if (node.op === '+') return polyAdd(l, r, 1);
+      if (node.op === '-') return polyAdd(l, r, -1);
+      if (node.op === '*') return polyMul(l, r);
+      if (node.op === '/') {
+        if (r[0] || r[1] || !r[2]) return null;
+        return l.map((c) => snap(c / r[2]));
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** Многочлен из уравнения «левая = правая». */
+export function equationPoly(equation, name = 'x') {
+  const m = /^([^=]+)=([^=]+)$/.exec(String(equation).trim());
+  if (!m) return null;
+  const left = polyOf(parseAlgebra(m[1]), name);
+  const right = polyOf(parseAlgebra(m[2]), name);
+  if (!left || !right) return null;
+  return polyAdd(left, right, -1);
+}
+
+/** Многочлен из выражения (приводим к виду «… = 0»). */
+export function polyFromExpression(expr, name = 'x') {
+  return polyOf(parseAlgebra(expr), name);
+}
+
+/** Запись многочлена: «2x² − 5x + 3». Нулевые слагаемые опускаются. */
+export function polyText(coeffs, name = 'x') {
+  const symbols = [`${name}²`, name, ''];
+  const parts = [];
+  coeffs.forEach((c, i) => {
+    if (!c) return;
+    const abs = Math.abs(c);
+    const body = symbols[i] && Math.abs(abs - 1) < 1e-12 ? symbols[i] : `${fmt(abs)}${symbols[i]}`;
+    if (!parts.length) parts.push(`${c < 0 ? '−' : ''}${body}`);
+    else parts.push(`${c < 0 ? '−' : '+'} ${body}`);
+  });
+  return parts.join(' ') || '0';
+}
+
+/** Степень многочлена. */
+export function polyDegree(coeffs) {
+  if (coeffs[0]) return 2;
+  if (coeffs[1]) return 1;
+  return coeffs[2] ? 0 : -1;
+}
+
+/** Корни многочлена: [] — нет корней, null — корней бесконечно много. */
+export function polyRoots(coeffs) {
+  const [c2, c1, c0] = coeffs;
+  if (!c2) {
+    if (!c1) return null;
+    return [-c0 / c1];
+  }
+  const d = c1 * c1 - 4 * c2 * c0;
+  if (d < -1e-9) return [];
+  if (Math.abs(d) < 1e-9) return [-c1 / (2 * c2)];
+  const s = Math.sqrt(d);
+  return [(-c1 - s) / (2 * c2), (-c1 + s) / (2 * c2)].sort((a, b) => a - b);
+}
+
+export { gcd, lcm, plural, ZERO_POLY };
+
+// --- множества решений неравенств --------------------------------------------
+
+/**
+ * Множество решений — список промежутков {lo, hi, loOpen, hiOpen}.
+ * Пустой список означает «нет решений», единственный промежуток
+ * (−∞; +∞) — «все числа».
+ */
+export function intervalAll() {
+  return [{ lo: -Infinity, hi: Infinity, loOpen: true, hiOpen: true }];
+}
+
+const FLIP = { '<': '>', '>': '<', '<=': '>=', '>=': '<=' };
+
+/** Решение неравенства P(x) ⋈ 0, где P задан коэффициентами. */
+export function polyInequality(coeffs, op) {
+  let [a2, a1, a0] = coeffs;
+  let sign = op;
+  // Приводим к случаю «старший коэффициент положительный», переворачивая знак.
+  if (a2 < -1e-12 || (Math.abs(a2) < 1e-12 && a1 < -1e-12)) {
+    [a2, a1, a0] = [-a2, -a1, -a0];
+    sign = FLIP[op];
+  }
+
+  if (Math.abs(a2) < 1e-12) {
+    if (Math.abs(a1) < 1e-12) {
+      const holds = sign === '>' ? a0 > 0 : sign === '>=' ? a0 >= 0 : sign === '<' ? a0 < 0 : a0 <= 0;
+      return holds ? intervalAll() : [];
+    }
+    const r = -a0 / a1;
+    if (sign === '>') return [{ lo: r, hi: Infinity, loOpen: true, hiOpen: true }];
+    if (sign === '>=') return [{ lo: r, hi: Infinity, loOpen: false, hiOpen: true }];
+    if (sign === '<') return [{ lo: -Infinity, hi: r, loOpen: true, hiOpen: true }];
+    return [{ lo: -Infinity, hi: r, loOpen: true, hiOpen: false }];
+  }
+
+  const roots = polyRoots([a2, a1, a0]);
+  if (!roots.length) {
+    // Ветви вверх, корней нет: P(x) > 0 при любом x.
+    return sign === '>' || sign === '>=' ? intervalAll() : [];
+  }
+  if (roots.length === 1) {
+    const r = roots[0];
+    if (sign === '>') {
+      return [
+        { lo: -Infinity, hi: r, loOpen: true, hiOpen: true },
+        { lo: r, hi: Infinity, loOpen: true, hiOpen: true },
+      ];
+    }
+    if (sign === '>=') return intervalAll();
+    if (sign === '<') return [];
+    return [{ lo: r, hi: r, loOpen: false, hiOpen: false }];
+  }
+
+  const [r1, r2] = roots;
+  if (sign === '>') {
+    return [
+      { lo: -Infinity, hi: r1, loOpen: true, hiOpen: true },
+      { lo: r2, hi: Infinity, loOpen: true, hiOpen: true },
+    ];
+  }
+  if (sign === '>=') {
+    return [
+      { lo: -Infinity, hi: r1, loOpen: true, hiOpen: false },
+      { lo: r2, hi: Infinity, loOpen: false, hiOpen: true },
+    ];
+  }
+  if (sign === '<') return [{ lo: r1, hi: r2, loOpen: true, hiOpen: true }];
+  return [{ lo: r1, hi: r2, loOpen: false, hiOpen: false }];
+}
+
+/** Пересечение двух множеств — решение системы. */
+export function intervalIntersect(a, b) {
+  const out = [];
+  for (const x of a) {
+    for (const y of b) {
+      const lo = Math.max(x.lo, y.lo);
+      const hi = Math.min(x.hi, y.hi);
+      if (lo > hi) continue;
+      const loOpen = (lo === x.lo && x.loOpen) || (lo === y.lo && y.loOpen);
+      const hiOpen = (hi === x.hi && x.hiOpen) || (hi === y.hi && y.hiOpen);
+      if (lo === hi && (loOpen || hiOpen)) continue;
+      out.push({ lo, hi, loOpen, hiOpen });
+    }
+  }
+  return out.sort((p, q) => p.lo - q.lo);
+}
+
+/** Совпадают ли два множества (с точностью до порядка промежутков). */
+export function intervalEqual(a, b, eps = 1e-9) {
+  const same = (p, q) =>
+    ((p.lo === q.lo) || (Number.isFinite(p.lo) && Number.isFinite(q.lo) && Math.abs(p.lo - q.lo) < eps)) &&
+    ((p.hi === q.hi) || (Number.isFinite(p.hi) && Number.isFinite(q.hi) && Math.abs(p.hi - q.hi) < eps)) &&
+    p.loOpen === q.loOpen &&
+    p.hiOpen === q.hiOpen;
+  return a.length === b.length && a.every((iv, i) => same(iv, b[i]));
+}
+
+/** Запись множества: «(−∞; −7) ∪ (7; +∞)», «нет решений». */
+export function intervalText(set) {
+  if (!set.length) return 'нет решений';
+  if (set.length === 1 && set[0].lo === -Infinity && set[0].hi === Infinity) return '(−∞; +∞)';
+  const num = (v) => fmt(v).replace('-', '−');
+  const bounds = set.map((iv) => {
+    if (iv.lo === iv.hi) return `{${num(iv.lo)}}`;
+    const left = iv.lo === -Infinity ? '−∞' : num(iv.lo);
+    const right = iv.hi === Infinity ? '+∞' : num(iv.hi);
+    return `${iv.loOpen ? '(' : '['}${left}; ${right}${iv.hiOpen ? ')' : ']'}`;
+  });
+  return bounds.join(' ∪ ');
+}
+
+function parseBound(text) {
+  const t = text.replace(/\s+/g, '').replace(/−/g, '-');
+  if (/^\+?∞$/.test(t)) return Infinity;
+  if (/^-∞$/.test(t)) return -Infinity;
+  const v = Number(t.replace(',', '.').replace(/^\+/, ''));
+  return Number.isFinite(v) ? v : null;
+}
+
+/** Разбор записи промежутка из варианта ответа; null — если это не промежуток. */
+export function parseIntervalSet(text) {
+  const s = String(text).replace(/\s+/g, '').replace(/−/g, '-');
+  if (!s) return null;
+  if (/^нетрешений\.?$/i.test(s)) return [];
+  if (/^бесконечномножестворешений\.?$/i.test(s)) return intervalAll();
+  const out = [];
+  for (const part of s.split('∪')) {
+    const m = /^([[(])([^;]*);([^)\]]*)([)\]])$/.exec(part);
+    if (!m) return null;
+    const lo = parseBound(m[2]);
+    const hi = parseBound(m[3]);
+    if (lo == null || hi == null) return null;
+    out.push({ lo, hi, loOpen: m[1] === '(', hiOpen: m[4] === ')' });
+  }
+  return out;
+}
