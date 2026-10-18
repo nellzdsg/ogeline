@@ -86,6 +86,19 @@ function textAsSymbol(node) {
 }
 
 /**
+ * Нижний индекс («t_F», «d_1») сохраняем как часть имени переменной: без него
+ * «d_1 d_2» превращается в «d d», и задачу уже не решить.
+ */
+function subExpr(base, sub) {
+  const b = String(base).trim();
+  const s = String(sub).trim();
+  const simpleBase = new RegExp(`^[A-Za-z\\u03b1-\\u03c9][A-Za-z0-9\\u03b1-\\u03c9_]*$`).test(b);
+  const simpleSub = /^[A-Za-z0-9\u03b1-\u03c9_]+$/.test(s);
+  if (simpleBase && simpleSub) return `(${b}_${s})`;
+  return `(${b})`;
+}
+
+/**
  * Переводит узел MathML в выражение, пригодное для вычисления.
  * @returns {string}
  */
@@ -125,11 +138,15 @@ export function toExpr(node) {
     case 'msup':
       return `((${toExpr(children[0])})^(${toExpr(children[1])}))`;
 
+    case 'mfenced':
+      // Скобки группы. Без них теряется смысл: t_C = 5/9 (t_F − 32).
+      return `(${children.map(toExpr).join(' ')})`;
+
     case 'msub':
-      return `(${toExpr(children[0])})`;
+      return subExpr(toExpr(children[0]), toExpr(children[1]));
 
     case 'msubsup':
-      return `((${toExpr(children[0])})^(${toExpr(children[1])}))`;
+      return `((${subExpr(toExpr(children[0]), toExpr(children[1]))})^(${toExpr(children[2])}))`;
 
     case 'msqrt':
       return `sqrt(${children.map(toExpr).join(' ')})`;

@@ -32,9 +32,10 @@ export function extractMedia(html) {
     if (!calls.length) return '';
     const imgs = [];
     for (const call of calls) {
-      for (const arg of call[1].matchAll(/'([^']*)'/g)) {
-        const src = arg[1];
-        if (MEDIA_RE.test(src)) imgs.push(push(src));
+      // Аргументы банк пишет и в одинарных, и в двойных кавычках.
+      for (const arg of call[1].matchAll(/'([^']*)'|"([^"]*)"/g)) {
+        const src = arg[1] || arg[2];
+        if (src && MEDIA_RE.test(src)) imgs.push(push(src));
       }
     }
     return imgs.join('');

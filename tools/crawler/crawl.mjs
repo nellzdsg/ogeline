@@ -37,6 +37,16 @@ async function exists(p) {
   }
 }
 
+/**
+ * Тема задания определяется первым КЭС: одно задание может относиться к нескольким
+ * разделам, и тогда банк показывает его в списках разных тем.
+ */
+function sectionOfKes(kes, fallback) {
+  const first = (kes || []).find((k) => /^\d/.test(String(k).trim()));
+  const m = first && String(first).match(/^(\d+)/);
+  return m ? m[1] : fallback;
+}
+
 async function loadKnownGuids(file) {
   const known = new Map();
   if (!(await exists(file))) return known;
@@ -60,6 +70,9 @@ async function main() {
   const pages = Number(args.pages || 5);
   const pagesize = Number(args.pagesize || 50);
   const themeArg = args.theme || 'all';
+  // В режиме refresh уже известные задания пересобираются заново (нужно, если
+  // поправился разбор HTML), при этом подтверждённые ответы сохраняются.
+  const refresh = Boolean(args.refresh) && args.refresh !== 'false';
 
   const outDir = path.join(ROOT, 'data', subject.key);
   const mediaDir = path.join(outDir, 'media');
@@ -86,6 +99,7 @@ async function main() {
   await writeFile(path.join(outDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8');
 
   let added = 0;
+  let updated = 0;
   let downloaded = 0;
   const startedAt = Date.now();
 
@@ -107,7 +121,8 @@ async function main() {
         }
 
         for (const task of tasks) {
-          if (known.has(task.guid)) continue;
+          const existing = known.get(task.guid);
+          if (existing && !refresh) continue;
 
           const stem = prepareFragment(task.stemHtml);
           const options = task.options
@@ -143,17 +158,36 @@ async function main() {
             id: task.id,
             guid: task.guid,
             subject: subject.key,
-            theme: theme.code,
+            theme: sectionOfKes(task.kes, theme.code),
             kes: task.kes,
             kind: task.kind,
             hint: task.hint,
             stem: stem.html,
             options,
             media: uniqMedia.map((m) => m.name),
-            answer: null,
-            answerChecked: false,
-            addedAt: new Date().toISOString(),
+            answer: existing?.answer ?? null,
+            answerChecked: existing?.answerChecked ?? false,
+            addedAt: existing?.addedAt ?? new Date().toISOString(),
           };
+          if (existing?.answerMethod) record.answerMethod = existing.answerMethod;
+          if (existing?.answerCheckedAt) record.answerCheckedAt = existing.answerCheckedAt;
+          if (existing?.answerFailed) record.answerFailed = existing.answerFailed;
+
+          if (existing) {
+            const sameStem = existing.stem === record.stem;
+            const sameOptions = JSON.stringify(existing.options ?? null) === JSON.stringify(record.options ?? null);
+            const sameMedia = (existing.media ?? []).length === record.media.length;
+            known.set(task.guid, record);
+            if (sameStem && sameOptions && sameMedia) continue;
+
+            record.updatedAt = new Date().toISOString();
+            updated++;
+            if (updated % 25 === 0) {
+              const sec = ((Date.now() - startedAt) / 1000).toFixed(0);
+              console.log(`  ~ обновлено ${updated}, картинок ${downloaded} (${sec} с)`);
+            }
+            continue;
+          }
 
           await appendFile(tasksFile, JSON.stringify(record) + '\n', 'utf8');
           known.set(task.guid, record);
@@ -170,11 +204,15 @@ async function main() {
     }
   }
 
+  if (refresh) {
+    await writeFile(tasksFile, [...known.values()].map((t) => JSON.stringify(t)).join('\n') + '\n', 'utf8');
+  }
+
   const byKind = {};
   for (const t of known.values()) byKind[t.kind] = (byKind[t.kind] || 0) + 1;
 
   console.log(`\n[${subject.key}] Готово.`);
-  console.log(`  всего заданий: ${known.size} (новых ${added})`);
+  console.log(`  всего заданий: ${known.size} (новых ${added}${refresh ? `, обновлено ${updated}` : ''})`);
   console.log(`  картинок скачано: ${downloaded}`);
   console.log('  по типам:');
   for (const [kind, n] of Object.entries(byKind).sort((a, b) => b[1] - a[1])) {

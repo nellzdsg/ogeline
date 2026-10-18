@@ -353,4 +353,205 @@ function plural(n, one, few, many) {
   return many;
 }
 
+// --- упрощение степеней ------------------------------------------------------
+
+/** Токенизация выражения с переменными; null, если есть непонятный текст. */
+function tokenizeAlgebra(src) {
+  const re = /(sqrt|[A-Za-z\u03b1-\u03c9][A-Za-z0-9_\u03b1-\u03c9]*|\d+(?:[.,]\d+)?|[()+\-*/^])/g;
+  const tokens = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(src))) {
+    if (src.slice(last, m.index).trim()) return null;
+    tokens.push(m[1]);
+    last = re.lastIndex;
+  }
+  if (src.slice(last).trim()) return null;
+  return tokens;
+}
+
+/** Разбор выражения со степенями, корнями и переменными (для упрощения). */
+export function parseAlgebra(src) {
+  const tokens = tokenizeAlgebra(src);
+  if (!tokens || !tokens.length) return null;
+  let pos = 0;
+  const peek = () => tokens[pos];
+  const take = () => tokens[pos++];
+
+  function parseAdd() {
+    let node = parseMul();
+    while (peek() === '+' || peek() === '-') {
+      const op = take();
+      node = { type: 'bin', op, l: node, r: parseMul() };
+    }
+    return node;
+  }
+  function parseMul() {
+    let node = parseUnary();
+    while (peek() === '*' || peek() === '/') {
+      const op = take();
+      node = { type: 'bin', op, l: node, r: parseUnary() };
+    }
+    return node;
+  }
+  function parseUnary() {
+    if (peek() === '-') {
+      take();
+      return { type: 'neg', arg: parseUnary() };
+    }
+    if (peek() === '+') {
+      take();
+      return parseUnary();
+    }
+    return parsePow();
+  }
+  function parsePow() {
+    const base = parsePrimary();
+    if (peek() === '^') {
+      take();
+      return { type: 'pow', base, exp: parseUnary() };
+    }
+    return base;
+  }
+  function parsePrimary() {
+    const t = take();
+    if (t === '(') {
+      const e = parseAdd();
+      if (peek() !== ')') throw new Error('скобка');
+      take();
+      return e;
+    }
+    if (t === ')') throw new Error('скобка');
+    if (t === 'sqrt') {
+      if (peek() === '(') {
+        take();
+        const e = parseAdd();
+        if (peek() !== ')') throw new Error('корень');
+        take();
+        return { type: 'sqrt', arg: e };
+      }
+      return { type: 'sqrt', arg: parsePrimary() };
+    }
+    if (t != null && /^\d/.test(t)) return { type: 'num', raw: t, value: Number(t.replace(',', '.')) };
+    if (t != null && /^[A-Za-z\u03b1-\u03c9]/.test(t)) return { type: 'unknown', raw: t };
+    throw new Error('токен');
+  }
+
+  try {
+    const node = parseAdd();
+    if (pos !== tokens.length) return null;
+    return node;
+  } catch {
+    return null;
+  }
+}
+
+/** Степень или половинная степень, если показатель именно такой. */
+function powerExponent(node) {
+  const v = evalNode(node);
+  if (!Number.isFinite(v)) return null;
+  if (Number.isInteger(v)) return v;
+  if (Math.abs(v * 2 - Math.round(v * 2)) < 1e-9) return v;
+  return null;
+}
+
+const mulText = (t, e) => {
+  if (t === '1') return String(e);
+  return e < 0 ? `${t}·(${e})` : `${t}·${e}`;
+};
+const divText = (t, n) => (/[+\-]/.test(t) ? `(${t})/${n}` : `${t}/${n}`);
+
+/** Показатель как знаковое число: «1» со знаком −1 → «-1». */
+const signedText = (text, value) => (/^-?\d+$/.test(text) ? String(value) : text);
+
+function mergePowers(left, right, sign) {
+  const out = new Map(left);
+  for (const [base, item] of right) {
+    const value = sign * item.value;
+    const prev = out.get(base);
+    if (!prev) {
+      out.set(base, { value, text: signedText(item.text, value) });
+      continue;
+    }
+    out.set(base, { value: prev.value + value, text: `${prev.text} + ${signedText(item.text, value)}` });
+  }
+  return out;
+}
+
+/** Произведение степеней: Map<основание, {value: показатель, text: откуда он взялся}>. */
+function powerWalk(node) {
+  if (!node) return null;
+  switch (node.type) {
+    case 'num':
+      return new Map([[String(node.value), { value: 1, text: '1' }]]);
+    case 'unknown':
+      return new Map([[node.raw, { value: 1, text: '1' }]]);
+    case 'neg':
+      return powerWalk(node.arg);
+    case 'pow': {
+      const e = powerExponent(node.exp);
+      if (e == null) return null;
+      const base = node.base ?? {};
+      // (−a)^n: знак исчезает только при чётном целом показателе.
+      if (base.type === 'neg' && (!Number.isInteger(e) || Math.abs(e) % 2 !== 0)) return null;
+      const inner = powerWalk(base);
+      if (!inner) return null;
+      const out = new Map();
+      for (const [key, item] of inner) {
+        out.set(key, { value: item.value * e, text: mulText(item.text, e) });
+      }
+      return out;
+    }
+    case 'sqrt': {
+      const inner = powerWalk(node.arg);
+      if (!inner) return null;
+      const out = new Map();
+      for (const [key, item] of inner) {
+        out.set(key, { value: item.value / 2, text: divText(item.text, 2) });
+      }
+      return out;
+    }
+    case 'bin': {
+      if (node.op !== '*' && node.op !== '/') return null;
+      const l = powerWalk(node.l);
+      const r = powerWalk(node.r);
+      if (!l || !r) return null;
+      return mergePowers(l, r, node.op === '*' ? 1 : -1);
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Приводит выражение к произведению степеней: (a³)⁸·a⁷/a²⁹ → a².
+ * Возвращает список {base, exp, text} или null, если выражение не сводится
+ * к произведению и частному степеней (например, содержит сумму).
+ */
+export function powerForm(expr) {
+  const node = parseAlgebra(expr);
+  if (!node) return null;
+  const map = powerWalk(node);
+  if (!map || !map.size) return null;
+  const powers = [...map.entries()].map(([base, e]) => ({ base, exp: e.value, text: e.text }));
+  if (powers.some((p) => !Number.isFinite(p.exp))) return null;
+  return powers;
+}
+
+/** Значение произведения степеней при данных значениях переменных. */
+export function powerValue(powers, knowns = {}) {
+  let value = 1;
+  for (const { base, exp } of powers) {
+    const b = /^\d/.test(base) ? Number(base) : knowns[base];
+    if (b == null) return null;
+    value *= b ** exp;
+  }
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Основание для показа: «a», «2» или «(a + b)». */
+export function powerBase(base) {
+  return /^\d/.test(base) ? String(Number(base)) : base;
+}
+
 export { gcd, lcm, plural };
