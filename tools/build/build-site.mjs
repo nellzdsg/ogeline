@@ -10,10 +10,50 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe } from './prototypes.mjs';
-import { getSubject } from '../crawler/subjects.mjs';
+import { groupsFor, groupOf, variationOf } from './numbers.mjs';
+import { SUBJECTS, getSubject } from '../crawler/subjects.mjs';
 import { allTranscriptions } from '../crawler/lib/transcripts.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+async function fileExists(p) {
+  try {
+    await readFile(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Пишем список предметов для стартового меню: показываем все предметы ОГЭ,
+ * но задания есть только у тех, для которых уже собирали данные.
+ */
+async function writeSubjectsIndex(webDir, current) {
+  const file = path.join(webDir, 'data', 'subjects.json');
+  let previous = { subjects: [] };
+  try {
+    previous = JSON.parse(await readFile(file, 'utf8'));
+  } catch {
+    /* файла ещё нет */
+  }
+  const known = new Map((previous.subjects || []).map((s) => [s.key, s]));
+
+  const subjects = [];
+  for (const [key, info] of Object.entries(SUBJECTS)) {
+    const ready = await fileExists(path.join(webDir, 'data', `${key}.json`));
+    const old = known.get(key) || {};
+    subjects.push({
+      key,
+      title: info.title,
+      ready,
+      tasks: key === current.subject ? current.tasks : ready ? (old.tasks ?? 0) : 0,
+    });
+  }
+
+  await writeFile(file, JSON.stringify({ builtAt: new Date().toISOString(), subjects }), 'utf8');
+  return subjects;
+}
 
 function parseArgs(argv) {
   const args = {};
@@ -77,6 +117,9 @@ async function main() {
   const byPrototype = {};
   const prepared = [];
   const seen = new Set();
+  const groupCounts = new Map();
+  const variationCounts = new Map();
+  const unmapped = [];
 
   // На сайт попадает только задание, которое можно проверить и объяснить:
   // есть подтверждённый у ФИПИ ответ и разбор не «заглушка».
@@ -114,10 +157,22 @@ async function main() {
 
     count(t.theme, 'published');
     seen.add(t.theme);
+
+    // Номер задания ОГЭ (позиция в экзаменационной работе), а не код КЭС.
+    const number = groupOf(subject.key, t);
+    if (!number) {
+      unmapped.push(t.id);
+    } else {
+      groupCounts.set(number, (groupCounts.get(number) || 0) + 1);
+    }
+    const variation = variationOf(subject.key, t, number, analysis.prototype);
+    if (variation) variationCounts.set(variation, (variationCounts.get(variation) || 0) + 1);
+
     prepared.push({
       id: t.id,
       theme: t.theme,
-      kes: t.kes.map((k) => k.split(' ')[0]),
+      number,
+      variation,
       kind: t.kind,
       stem: t.stem,
       options: t.options,
@@ -127,6 +182,10 @@ async function main() {
       hints: analysis.hints,
       solution: analysis.steps,
     });
+  }
+
+  if (unmapped.length) {
+    console.warn(`  ! заданий без номера ОГЭ: ${unmapped.length} (${unmapped.slice(0, 5).join(', ')}…)`);
   }
 
   for (const [code, info] of progress) {
@@ -139,34 +198,28 @@ async function main() {
     }
   }
 
-  // Оставляем только темы, для которых есть задания, сохраняя структуру дерева.
-  const themeInfo = new Map(meta.themes.map((th) => [th.code, th]));
-  const counts = new Map();
-  for (const t of prepared) counts.set(t.theme, (counts.get(t.theme) || 0) + 1);
-
-  const themes = meta.themes
-    .filter((th) => counts.has(th.code))
-    .map((th) => ({
-      code: th.code,
-      title: th.title,
-      level: th.level,
-      count: counts.get(th.code) || 0,
-    }));
-
+  // Стабильный порядок заданий: по id.
   prepared.sort((a, b) => a.id.localeCompare(b.id));
 
-  // Названия подтем (КЭС) — для подсказок в фильтрах.
-  const usedKes = new Set(prepared.flatMap((t) => t.kes));
-  const kesTitles = {};
-  for (const th of meta.themes) if (usedKes.has(th.code)) kesTitles[th.code] = th.title;
+  // Карточки номеров: показываем всю структуру работы, даже если заданий по
+  // номеру ещё нет — так видно, что будет дальше.
+  const numbers = groupsFor(subject.key).map((g) => ({
+    ...g,
+    count: groupCounts.get(g.id) || 0,
+  }));
+
+  // Сюжеты практических задач (номера 1–5).
+  const variations = [...variationCounts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count);
 
   const out = {
     subject: meta.subject,
     title: meta.title,
     builtAt: new Date().toISOString(),
     source: 'Открытый банк заданий ОГЭ (ФИПИ)',
-    themes,
-    kesTitles,
+    numbers,
+    variations,
     tasks: prepared,
   };
 
@@ -176,9 +229,16 @@ async function main() {
     path.join(dataDir, 'media'),
     path.join(webDir, 'media'),
   );
+  await writeSubjectsIndex(webDir, { subject: subject.key, tasks: prepared.length });
 
   console.log(`[${subject.key}] Собрано заданий: ${prepared.length}`);
-  console.log(`  тем: ${themes.length}, картинок: ${mediaCount}`);
+  console.log(`  картинок: ${mediaCount}`);
+  console.log('  по номерам ОГЭ:');
+  for (const g of numbers) console.log(`    ${g.label.padEnd(10)} ${String(g.count).padStart(4)}  ${g.title}`);
+  if (variations.length) {
+    console.log('  подписи внутри карточек:');
+    for (const v of variations) console.log(`    ${v.label.padEnd(24)} ${v.count}`);
+  }
   console.log(`  без подтверждённого ответа: ${noAnswer}`);
   console.log(`  без разбора: ${noPrototype}`);
   console.log(`  расхождений с подтверждённым ответом: ${mismatches}`);

@@ -4,16 +4,28 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
-    <title>ОГЭлайн — подготовка к ОГЭ</title>
+    <meta name="color-scheme" content="light dark" />
+    <title>ОГЭлайн — бесплатный тренажёр по открытому банку ФИПИ</title>
     <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Тему выбираем до первой отрисовки, иначе страница мигнёт белым.
+      try {
+        var saved = localStorage.getItem('ogeline:theme');
+        var dark = saved
+          ? saved === 'dark'
+          : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <header class="topbar">
       <div class="topbar__inner">
-        <a class="brand" href="#" id="brand">
+        <a class="brand" href="#/" id="brand">
           <span class="brand__mark">ОГЭ</span><span class="brand__name">лайн</span>
         </a>
         <div class="topbar__sub">Открытый банк заданий ФИПИ</div>
+        <button class="theme-toggle" id="theme-toggle" type="button" title="Сменить тему"></button>
       </div>
     </header>
 
@@ -21,8 +33,8 @@
 
     <footer class="footer">
       <p>
-        Бесплатный тренажёр. Задания — из открытого банка заданий ОГЭ (ФИПИ).
-        Прогресс сохраняется в этом браузере и никуда не отправляется.
+        ОГЭлайн — бесплатный тренажёр для подготовки к ОГЭ. Задания взяты из открытого банка
+        заданий ФИПИ. Прогресс сохраняется в этом браузере и никуда не отправляется.
       </p>
     </footer>
 
