@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>ОГЭлайн — превью ссылки</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: #0b0f18;
+        color: #e7ecf6;
+        font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+      }
+      .card {
+        position: relative;
+        width: 1200px;
+        height: 630px;
+        padding: 62px 72px 54px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
+      }
+      .glow-a,
+      .glow-b {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(90px);
+        pointer-events: none;
+      }
+      .glow-a {
+        width: 620px;
+        height: 620px;
+        right: -150px;
+        top: -260px;
+        background: rgba(59, 91, 219, 0.55);
+      }
+      .glow-b {
+        width: 520px;
+        height: 520px;
+        left: -220px;
+        bottom: -280px;
+        background: rgba(31, 138, 76, 0.35);
+      }
+      .grid {
+        position: absolute;
+        inset: 0;
+        background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: radial-gradient(circle at 60% 40%, #000 20%, transparent 78%);
+      }
+      .content {
+        position: relative;
+        display: flex;
+        gap: 48px;
+        align-items: center;
+      }
+      .left {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #8aa4ff;
+        margin-bottom: 26px;
+      }
+      .badge i {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: #57d38c;
+        box-shadow: 0 0 16px rgba(87, 211, 140, 0.9);
+      }
+      h1 {
+        margin: 0 0 16px;
+        font-size: 104px;
+        line-height: 0.98;
+        letter-spacing: -0.035em;
+        font-weight: 800;
+      }
+      h1 .accent { color: #8aa4ff; }
+      .lead {
+        margin: 0 0 34px;
+        font-size: 31px;
+        line-height: 1.28;
+        color: #b9c3d8;
+        max-width: 620px;
+      }
+      .stats {
+        display: flex;
+        gap: 40px;
+      }
+      .stat b {
+        display: block;
+        font-size: 34px;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+      }
+      .stat span {
+        display: block;
+        margin-top: 6px;
+        font-size: 18px;
+        color: #8e9ab2;
+        max-width: 190px;
+      }
+      .stat.good b { color: #57d38c; }
+      .stat.accent b { color: #8aa4ff; }
+
+      .mock {
+        flex: 0 0 348px;
+        background: rgba(22, 28, 40, 0.92);
+        border: 1px solid rgba(138, 164, 255, 0.28);
+        border-radius: 22px;
+        padding: 26px 26px 24px;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+        transform: rotate(-1.2deg);
+      }
+      .mock__top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 16px;
+        color: #8e9ab2;
+        margin-bottom: 18px;
+      }
+      .mock__no {
+        font-weight: 700;
+        color: #8aa4ff;
+        letter-spacing: 0.04em;
+      }
+      .mock__title {
+        font-size: 22px;
+        font-weight: 600;
+        margin-bottom: 18px;
+      }
+      .mock__formula {
+        font-family: Cambria, "Times New Roman", serif;
+        font-size: 30px;
+        padding: 18px 20px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        margin-bottom: 18px;
+        white-space: nowrap;
+      }
+      .mock__input {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 17px;
+        color: #8e9ab2;
+      }
+      .mock__field {
+        flex: 1;
+        height: 44px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.04);
+        display: flex;
+        align-items: center;
+        padding: 0 14px;
+        font-size: 19px;
+        color: #e7ecf6;
+      }
+      .mock__btn {
+        height: 44px;
+        padding: 0 18px;
+        border-radius: 10px;
+        background: #8aa4ff;
+        color: #10141d;
+        font-weight: 700;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+      }
+      .mock__ok {
+        margin-top: 14px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #57d38c;
+        background: rgba(87, 211, 140, 0.12);
+        border: 1px solid rgba(87, 211, 140, 0.35);
+        border-radius: 999px;
+        padding: 6px 14px;
+      }
+
+      .foot {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding-top: 22px;
+        font-size: 21px;
+      }
+      .foot .url { color: #8aa4ff; font-weight: 600; letter-spacing: 0.01em; }
+      .foot .note { color: #7d8aa2; font-size: 18px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="glow-a"></div>
+      <div class="glow-b"></div>
+      <div class="grid"></div>
+
+      <div class="content">
+        <div class="left">
+          <div class="badge"><i></i>Открытый банк заданий ФИПИ</div>
+          <h1><span class="accent">ОГЭ</span>лайн</h1>
+          <p class="lead">Бесплатный тренажёр для подготовки к ОГЭ: задания, подсказки и разборы.</p>
+          <div class="stats">
+            <div class="stat accent"><b>863</b><span>задания по математике</span></div>
+            <div class="stat"><b>№ 1–25</b><span>как в варианте экзамена</span></div>
+            <div class="stat good"><b>0 ₽</b><span>без регистрации</span></div>
+          </div>
+        </div>
+
+        <div class="mock">
+          <div class="mock__top">
+            <span class="mock__no">№ 9 · Уравнения</span>
+            <span>1 из 99</span>
+          </div>
+          <div class="mock__title">Найдите корень уравнения</div>
+          <div class="mock__formula">5(x + 9) = −8</div>
+          <div class="mock__input">
+            <span>Ответ:</span>
+            <span class="mock__field">−10,6</span>
+            <span class="mock__btn">Проверить</span>
+          </div>
+          <div class="mock__ok">✓ Верно! Отличная работа</div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <span class="url">nellzdsg.github.io/ogeline</span>
+        <span class="note">математика уже доступна · остальные предметы постепенно</span>
+      </div>
+    </div>
+  </body>
+</html>
