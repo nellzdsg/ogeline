@@ -436,6 +436,64 @@ function onCheck() {
   if (hints) hints.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+// --- увеличение чертежа ------------------------------------------------------
+
+let zoomEl = null;
+
+function onZoomKey(e) {
+  if (e.key === 'Escape') closeZoom();
+}
+
+function closeZoom() {
+  if (!zoomEl) return;
+  document.removeEventListener('keydown', onZoomKey);
+  zoomEl.remove();
+  zoomEl = null;
+  document.body.classList.remove('is-zoomed');
+}
+
+function openZoom(src, alt) {
+  if (!src) return;
+  closeZoom();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'img-zoom';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', alt || 'Изображение к заданию');
+
+  const img = document.createElement('img');
+  img.src = src;
+  img.alt = alt || '';
+
+  const hint = document.createElement('div');
+  hint.className = 'img-zoom__hint';
+  hint.textContent = 'Разведите два пальца, чтобы увеличить сильнее. Закрыть — тап по фону или ✕.';
+
+  const close = document.createElement('button');
+  close.className = 'img-zoom__close';
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Закрыть');
+  close.textContent = '×';
+
+  overlay.append(img, hint, close);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target === close) closeZoom();
+  });
+
+  document.addEventListener('keydown', onZoomKey);
+  document.body.appendChild(overlay);
+  document.body.classList.add('is-zoomed');
+  zoomEl = overlay;
+  close.focus();
+}
+
+// Клик по чертежу в условии открывает его крупно.
+app.addEventListener('click', (e) => {
+  const img = e.target.closest?.('.statement img.q-img');
+  if (img) openZoom(img.getAttribute('src'), img.getAttribute('alt'));
+});
+
 // --- запуск ------------------------------------------------------------------
 
 async function main() {
