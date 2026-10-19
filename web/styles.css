@@ -645,6 +645,32 @@ h2 {
   padding: 2px 6px;
 }
 
+/* Дополнение к условию, которого нет в карточке банка (например, маркировка шин). */
+.statement-note {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -6px 0 18px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 0.98rem;
+}
+
+.note-tag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 /* --- варианты ответа --- */
 .options {
   display: flex;

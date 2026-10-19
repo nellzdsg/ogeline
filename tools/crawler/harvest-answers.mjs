@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { openSession, checkAnswer, sleepMs } from './lib/http.mjs';
 import { candidatesFor } from './lib/solvers.mjs';
+import { collectMarkings, collectTables } from './lib/tires.mjs';
 import { getSubject } from './subjects.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -42,9 +43,9 @@ function combinations(items, size) {
 }
 
 /** Подбирает ответ: перебором вариантов или вычислением + проверкой. */
-async function harvestAnswer(proj, task) {
+async function harvestAnswer(proj, task, markings, tables) {
   if (task.kind === 'short') {
-    const candidates = candidatesFor(task);
+    const candidates = candidatesFor(task, { markings, tables });
     for (const candidate of candidates) {
       if (await checkAnswer(proj, task.guid, candidate)) {
         return { answer: candidate, method: 'вычислено и проверено' };
@@ -97,6 +98,10 @@ async function main() {
   console.log(`Заданий к обработке: ${targets.length} (предмет ${subject.key})`);
   if (!targets.length) return;
 
+  const markings = collectMarkings(tasks);
+  const tables = collectTables(tasks);
+  if (markings.length) console.log(`Маркировок шин для перебора: ${markings.length}, таблиц: ${tables.length}`);
+
   await openSession(subject.proj);
 
   let done = 0;
@@ -106,7 +111,7 @@ async function main() {
   for (const task of targets) {
     let result = null;
     try {
-      result = await harvestAnswer(subject.proj, task);
+      result = await harvestAnswer(subject.proj, task, markings, tables);
     } catch (err) {
       console.warn(`  ! ${task.id}: ${err.message}`);
     }

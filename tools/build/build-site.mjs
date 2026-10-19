@@ -175,6 +175,7 @@ async function main() {
       variation,
       kind: t.kind,
       stem: t.stem,
+      added: t.addedCondition || null,
       options: t.options,
       answer: t.answer ?? null,
       answerDigits: t.answer != null ? String(t.answer) : null,

@@ -33,6 +33,16 @@ import {
 } from './expr.mjs';
 import { transcribedFormula } from '../crawler/lib/transcripts.mjs';
 import {
+  solveTire,
+  parseMarking,
+  markingText,
+  sidewallHeight,
+  wheelDiameter,
+  tireTable,
+} from '../crawler/lib/tires.mjs';
+import { solvePaper, matchAnswer, formatSize } from '../crawler/lib/paper.mjs';
+import { solveProducts } from '../crawler/lib/products.mjs';
+import {
   analyzeFormula,
   evalExpr,
   fixNumberText,
@@ -1742,11 +1752,370 @@ function inequalityLine(coeffs, op) {
   return `${polyText(coeffs)} ${OP_TEXT[op]} 0`;
 }
 
+// --- задания про шины (номера 1–5) ------------------------------------------
+
+/**
+ * Разбор заданий про шины. Маркировка «205/55 R16» читается как ширина 205 мм,
+ * профиль 55 % и диаметр диска 16 дюймов; отсюда высота боковины и диаметр колеса.
+ */
+function solveTireExplain(task, text) {
+  const tire = solveTire(text, task.stem);
+  if (!tire) return null;
+
+  if (tire.type === 'sidewall') {
+    const m = tire.marking;
+    const share = m.p / 100;
+    const height = sidewallHeight(m);
+
+    return {
+      prototype: 'tire-sidewall',
+      hints: [
+        `Маркировка ${markingText(m)} читается так: ${m.w} — ширина шины в миллиметрах, ${m.p} — профиль, ${m.d} — диаметр диска в дюймах.`,
+        `Профиль ${m.p} — это высота боковины в процентах от ширины. Переведём проценты в доли: ${m.p} % = ${fmt(share)}.`,
+        `Осталось умножить ширину на профиль: ${m.w} · ${fmt(share)} = ?`,
+      ],
+      steps: [
+        `В маркировке ${markingText(m)} первое число — ширина шины (${m.w} мм), второе — профиль (${m.p} % от ширины).`,
+        `Высота боковины = ширина · профиль / 100.`,
+        `${m.p} % = ${fmt(share)}, поэтому высота равна ${m.w} · ${fmt(share)}.`,
+        `${m.w} · ${fmt(share)} = ${fmt(height)} мм.`,
+        `Ответ: ${fmt(height)}.`,
+      ],
+      answer: fmt(height),
+    };
+  }
+
+  if (tire.type === 'table') {
+    const table = tireTable(task.stem);
+    const dm = text.match(/диаметр\w*\s+диска\s+(?:равен|равняется)\s+(\d+)/i);
+    if (!table || !dm) return null;
+
+    const diameter = Number(dm[1]);
+    const index = table.diameters.indexOf(diameter);
+    if (index < 0) return null;
+
+    const allowed = table.data.filter((row) => row.cells[index] && !/^[—–-]$/.test(row.cells[index]));
+    const widths = allowed.map((row) => row.width);
+    const wanted = /наибольшей/i.test(text) ? Math.max(...widths) : Math.min(...widths);
+    const listText = allowed.map((row) => `${row.width} мм — ${row.cells[index]}`).join('; ');
+
+    return {
+      prototype: 'tire-table',
+      hints: [
+        `В таблице по столбцам отложен диаметр диска, по строкам — ширина шины. Найдите столбец «${diameter}».`,
+        `В этом столбце отмечены разрешённые маркировки. Если стоит прочерк, такую шину ставить нельзя.`,
+        `Подходящие варианты: ${listText}. Осталось выбрать ${/наибольшей/i.test(text) ? 'наибольшую' : 'наименьшую'} ширину.`,
+      ],
+      steps: [
+        `Нужен столбец таблицы с диаметром диска ${diameter} дюймов.`,
+        `Выпишем разрешённые ширины в этом столбце: ${widths.join(', ')} мм.`,
+        `Из них требуется ${/наибольшей/i.test(text) ? 'наибольшая' : 'наименьшая'} — это ${fmt(wanted)} мм.`,
+        `Ответ: ${fmt(wanted)}.`,
+      ],
+      answer: fmt(wanted),
+    };
+  }
+
+  // Дальше нужна заводская маркировка: в карточке банка её нет, она восстанавливается
+  // по подтверждённому ответу (см. tools/crawler/restore-tires.mjs).
+  const factory = task.tireFactory ? parseMarking(task.tireFactory) : null;
+  if (!factory) return null;
+
+  const dOld = wheelDiameter(factory);
+  const factoryText = markingText(factory);
+
+  if (tire.type === 'factory') {
+    const value = dOld;
+    return {
+      prototype: 'tire-diameter',
+      hints: [
+        `Заводская маркировка — ${factoryText}. Диаметр колеса складывается из диаметра диска и двух высот боковины.`,
+        `Диск: ${factory.d} · 25,4 мм. Одна боковина: ${factory.w} · ${fmt(factory.p / 100)} мм.`,
+        `Диаметр колеса = ${factory.d} · 25,4 + 2 · ${factory.w} · ${fmt(factory.p / 100)}. Посчитайте и запишите с точностью до десятых.`,
+      ],
+      steps: [
+        `Заводская маркировка: ${factoryText}.`,
+        `Ширина ${factory.w} мм, профиль ${factory.p} %, диск ${factory.d} дюймов.`,
+        `Диаметр диска в миллиметрах: ${factory.d} · 25,4 = ${fmt(factory.d * 25.4)}.`,
+        `Высота боковины: ${factory.w} · ${fmt(factory.p / 100)} = ${fmt(sidewallHeight(factory))} мм.`,
+        `Диаметр колеса: ${fmt(factory.d * 25.4)} + 2 · ${fmt(sidewallHeight(factory))} = ${fmt(value)} мм.`,
+        `Ответ: ${fmt(value)}.`,
+      ],
+      answer: fmt(value),
+    };
+  }
+
+  const neo = tire.marking;
+  const dNew = wheelDiameter(neo);
+  const neoText = markingText(neo);
+
+  if (tire.type === 'diameter') {
+    const value = Math.abs(dNew - dOld);
+    return {
+      prototype: 'tire-diameter-diff',
+      hints: [
+        `Сравниваем два колеса: заводское (${factoryText}) и новое (${neoText}). Диаметр каждого — это диск плюс две боковины.`,
+        `Заводское: ${factory.d} · 25,4 + 2 · ${factory.w} · ${fmt(factory.p / 100)}. Новое: ${neo.d} · 25,4 + 2 · ${neo.w} · ${fmt(neo.p / 100)}.`,
+        `Найдите оба диаметра и вычтите меньший из большего. Ответ — в миллиметрах, с точностью до десятых.`,
+      ],
+      steps: [
+        `Диаметр заводского колеса (${factoryText}): ${fmt(dOld)} мм.`,
+        `Диаметр нового колеса (${neoText}): ${fmt(dNew)} мм.`,
+        `Разница: |${fmt(dNew)} − ${fmt(dOld)}| = ${fmt(value)} мм.`,
+        `Ответ: ${fmt(value)}.`,
+      ],
+      answer: fmt(value),
+    };
+  }
+
+  if (tire.type === 'percent') {
+    const percent = Math.abs(dNew / dOld - 1) * 100;
+    const value = Math.round(percent * 10) / 10;
+    return {
+      prototype: 'tire-percent',
+      hints: [
+        `За один оборот колесо проходит длину окружности, а она пропорциональна диаметру. Поэтому пробег меняется на столько же процентов, на сколько меняется диаметр.`,
+        `Заводское колесо (${factoryText}) имеет диаметр ${fmt(dOld)} мм, новое (${neoText}) — ${fmt(dNew)} мм.`,
+        `Считаем изменение: (новый диаметр / старый − 1) · 100 % и округляем до десятых.`,
+      ],
+      steps: [
+        `Диаметр заводского колеса: ${fmt(dOld)} мм.`,
+        `Диаметр нового колеса: ${fmt(dNew)} мм.`,
+        `Отношение диаметров: ${fmt(dNew)} / ${fmt(dOld)} = ${fmt(Math.round((dNew / dOld) * 10000) / 10000)}.`,
+        `Изменение в процентах: (${fmt(Math.round((dNew / dOld) * 10000) / 10000)} − 1) · 100 = ${fmt(percent)} %.`,
+        `Округляем до десятых: ${fmt(value)} %.`,
+        `Ответ: ${fmt(value)}.`,
+      ],
+      answer: fmt(value),
+    };
+  }
+
+  return null;
+}
+
+// --- задания про листы бумаги (номера 1–5) ----------------------------------
+
+function solvePaperExplain(task, text) {
+  const paper = solvePaper(text);
+  if (!paper) return null;
+
+  const F = (n) => formatSize(n);
+
+  if (paper.type === 'match') {
+    const formats = paper.details.formats;
+    const answer = matchAnswer(task.stem, formats);
+    if (!answer) return null;
+    const lines = formats.map((n) => {
+      const [long, short] = F(n);
+      return `А${n} — ${long}×${short} мм`;
+    });
+
+    return {
+      prototype: 'paper-match',
+      hints: [
+        'У каждого формата А свои размеры. А0 — 1189×841 мм, а каждый следующий формат — это половина предыдущего листа.',
+        'Найдите в таблице строку, в которой длина и ширина совпадают с размерами нужного формата. Номер этой строки и есть ответ для формата.',
+        `Размеры по порядку: ${lines.join(', ')}. Сопоставьте их со строками таблицы и прочитайте номера.`,
+      ],
+      steps: [
+        ...lines.map((line, i) => `${line} — это строка с номером ${answer[i]}.`),
+        `Читаем номера по порядку: ${answer}.`,
+        `Ответ: ${answer}.`,
+      ],
+      answer,
+    };
+  }
+
+  if (paper.type === 'count') {
+    const { from, to } = paper.details;
+    const value = paper.values[0];
+    return {
+      prototype: 'paper-count',
+      hints: [
+        'При переходе к следующему формату лист складывают пополам, поэтому из одного листа получается два.',
+        `От А${from} до А${to} — ${to - from} ${to - from === 1 ? 'шаг' : 'шага'}. Каждый шаг удваивает количество листов.`,
+        `Посчитайте ${Array.from({ length: to - from }, () => '2').join(' · ')} = ?`,
+      ],
+      steps: [
+        `Каждый следующий формат — половина предыдущего листа, значит листов становится в 2 раза больше.`,
+        `Разница номеров: ${to} − ${from} = ${to - from}.`,
+        `Количество листов: 2^${to - from} = ${fmt(value)}.`,
+        `Ответ: ${fmt(value)}.`,
+      ],
+      answer: fmt(value),
+    };
+  }
+
+  if (paper.type === 'area') {
+    const { format, long, short } = paper.details;
+    const value = paper.values[0];
+    return {
+      prototype: 'paper-area',
+      hints: [
+        `Лист формата А${format} имеет размеры ${long}×${short} мм. Площадь прямоугольника — это длина, умноженная на ширину.`,
+        'Сначала получим площадь в квадратных миллиметрах, а затем переведём в квадратные сантиметры: 1 см² = 100 мм².',
+        `Считаем: ${long} · ${short} = ? мм², затем делим на 100.`,
+      ],
+      steps: [
+        `Размеры листа А${format}: ${long}×${short} мм.`,
+        `Площадь: ${long} · ${short} = ${fmt(long * short)} мм².`,
+        `В одном квадратном сантиметре 100 мм², поэтому ${fmt(long * short)} : 100 = ${fmt(value)} см².`,
+        `Ответ: ${fmt(value)}.`,
+      ],
+      answer: fmt(value),
+    };
+  }
+
+  if (paper.type === 'side') {
+    const { format, side, value } = paper.details;
+    const rounded = paper.values[0];
+    const [long, short] = F(format);
+    const what = side === 'width' ? 'ширина' : 'длина';
+    return {
+      prototype: 'paper-side',
+      hints: [
+        `У листа формата А${format} размеры ${long}×${short} мм. Длина — большая сторона, ширина — меньшая.`,
+        `Значит, ${what} равна ${value} мм.`,
+        `Осталось округлить ${value} до ближайшего числа, кратного 10.`,
+      ],
+      steps: [
+        `Формат А${format}: ${long}×${short} мм.`,
+        `${what[0].toUpperCase() + what.slice(1)} — это ${value} мм.`,
+        `Ближайшее число, кратное 10: ${fmt(rounded)}.`,
+        `Ответ: ${fmt(rounded)}.`,
+      ],
+      answer: fmt(rounded),
+    };
+  }
+
+  if (paper.type === 'ratio') {
+    const { format, kind, value } = paper.details;
+    const rounded = paper.values[0];
+    const [long, short] = F(format);
+    return {
+      prototype: 'paper-ratio',
+      hints: [
+        'Отношение сторон — это частное: делим одну сторону на другую.',
+        `Лист А${format} имеет стороны ${long} и ${short} мм. ${kind === 'short-long' ? 'Меньшую делим на большую' : 'Большую делим на меньшую'}.`,
+        `Считаем ${kind === 'short-long' ? `${short} : ${long}` : `${long} : ${short}`} и округляем до десятых.`,
+      ],
+      steps: [
+        `Стороны листа А${format}: ${long} и ${short} мм.`,
+        `Отношение: ${kind === 'short-long' ? `${short} : ${long}` : `${long} : ${short}`} = ${fmt(Math.round(value * 10000) / 10000)}.`,
+        `Округляем до десятых: ${fmt(rounded)}.`,
+        `Ответ: ${fmt(rounded)}.`,
+      ],
+      answer: fmt(rounded),
+    };
+  }
+
+  if (paper.type === 'mass') {
+    const { format, count, grams, long, short } = paper.details;
+    const value = paper.values[0];
+    return {
+      prototype: 'paper-mass',
+      hints: [
+        'Масса пачки — это площадь всех листов, умноженная на массу одного квадратного метра бумаги.',
+        `Лист А${format}: ${long / 1000} м × ${short / 1000} м. Умножьте на ${count} листов, затем на ${grams} г.`,
+        `Считаем: ${long / 1000} · ${short / 1000} · ${count} · ${grams} = ?`,
+      ],
+      steps: [
+        `Переведём стороны листа в метры: ${long / 1000} м и ${short / 1000} м.`,
+        `Площадь одного листа: ${long / 1000} · ${short / 1000} = ${fmt((long / 1000) * (short / 1000))} м².`,
+        `Площадь ${count} листов: ${fmt((long / 1000) * (short / 1000))} · ${count} = ${fmt((long / 1000) * (short / 1000) * count)} м².`,
+        `Масса: ${fmt((long / 1000) * (short / 1000) * count)} · ${grams} = ${fmt(value)} г.`,
+        `Ответ: ${fmt(value)}.`,
+      ],
+      answer: fmt(value),
+    };
+  }
+
+  if (paper.type === 'font') {
+    const { target, base, size, value } = paper.details;
+    const rounded = paper.values[0];
+    const step = base - target; // >0 — целевой формат больше исходного
+    const ratio = 2 ** (step / 2);
+    const ratioText = fmt(Math.round(ratio * 10000) / 10000);
+    return {
+      prototype: 'paper-font',
+      hints: [
+        'При переходе к соседнему формату площадь листа меняется в 2 раза, а линейные размеры — в √2 раз. Во столько же раз меняется и высота шрифта.',
+        `Формат А${target} ${step > 0 ? 'больше' : 'меньше'} формата А${base} на ${Math.abs(step)} шаг(а), поэтому размер шрифта умножается на 2^(${step}/2) = ${ratioText}.`,
+        `Считаем ${size} · ${ratioText} = ${fmt(Math.round(size * ratio * 10) / 10)} и округляем до целого.`,
+      ],
+      steps: [
+        `Формат А${target} ${step > 0 ? 'больше' : 'меньше'} формата А${base} на ${Math.abs(step)} шаг(а).`,
+        `Линейные размеры меняются в 2^(${step}/2) = ${ratioText} раз.`,
+        `Высота шрифта: ${size} · ${ratioText} = ${fmt(Math.round(value * 10) / 10)} пунктов.`,
+        `Округляем до целого: ${fmt(rounded)}.`,
+        `Ответ: ${fmt(rounded)}.`,
+      ],
+      answer: fmt(rounded),
+    };
+  }
+
+  return null;
+}
+
+// --- покупка продуктов (номера 1–5) -----------------------------------------
+
+function solveProductsExplain(task, text) {
+  const solved = solveProducts(text, task.stem);
+  if (!solved) return null;
+
+  const { value, totals, stores, items, prices } = solved;
+  const names = new Map([
+    ['молоко', 'молоко'],
+    ['хлеб', 'хлеб'],
+    ['сыр', 'сыр «Российский»'],
+    ['говядина', 'говядина'],
+    ['картофель', 'картофель'],
+  ]);
+  const basket = items.map((it) => `${it.qty} × ${names.get(it.key)}`).join(', ');
+
+  const storeLines = stores.map(
+    (store, i) =>
+      `${store}: ${items
+        .map((it) => `${prices.get(it.key)[i]} · ${it.qty}`)
+        .join(' + ')} = ${fmt(totals[i])} руб.`,
+  );
+
+  const cheapest = stores[totals.indexOf(value)];
+
+  return {
+    prototype: 'products-basket',
+    hints: [
+      'В таблице указаны цены на каждый продукт в четырёх магазинах. Нужно посчитать стоимость всего набора в каждом магазине.',
+      `Набор: ${basket}. Умножьте цену продукта на количество и сложите все позиции.`,
+      `Стоимость набора: ${stores.map((s, i) => `${s} — ${fmt(totals[i])}`).join(', ')}. Выберите наименьшую.`,
+    ],
+    steps: [
+      `Считаем стоимость набора: ${basket}.`,
+      ...storeLines,
+      `Наименьшая стоимость — ${fmt(value)} руб. (${cheapest}).`,
+      `Ответ: ${fmt(value)}.`,
+    ],
+    answer: fmt(value),
+  };
+}
+
 export function describe(task) {
   const text = fixNumberText(plainText(task.stem));
   const kind = task.kind;
 
   if (kind === 'short') {
+    // Практико-ориентированные задания про шины (номера 1–5).
+    const tire = solveTireExplain(task, text);
+    if (tire) return tire;
+
+    // Практико-ориентированные задания про листы бумаги (номера 1–5).
+    const paper = solvePaperExplain(task, text);
+    if (paper) return paper;
+
+    // Покупка продуктов в одном из магазинов (номера 1–5).
+    const products = solveProductsExplain(task, text);
+    if (products) return products;
+
     const { knowns, literals } = taskValues(task, text);
     const expr = formulas(task.stem).find((e) => !e.includes('='));
 

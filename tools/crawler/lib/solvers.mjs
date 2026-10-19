@@ -8,6 +8,9 @@ import { parseFragment, toExpr, toInlineText, extractMathBlocks } from './mathml
 import { decodeEntities, stripTags } from './parse.mjs';
 import { transcribedFormula } from './transcripts.mjs';
 import { equationPoly, polyRoots } from '../../build/expr.mjs';
+import { solveTire, tireCandidates } from './tires.mjs';
+import { solvePaper, matchAnswer } from './paper.mjs';
+import { solveProducts } from './products.mjs';
 
 const MAX_CANDIDATES = 8;
 const LETTER = 'A-Za-z\\u03b1-\\u03c9';
@@ -611,9 +614,56 @@ export function rootsForAnswer(text, roots) {
 }
 
 /** Главная точка входа: возможные ответы для задания с кратким ответом. */
-export function candidatesFor(task) {  const text = fixNumberText(plainText(task.stem).replace(/\s+/g, ' '));
+export function candidatesFor(task, context = {}) {
+  const text = fixNumberText(plainText(task.stem).replace(/\s+/g, ' '));
   const expressions = formulaExpressions(task.stem);
   const values = [];
+
+  // Листы бумаги: форматы А0…А6, площади, отношения сторон.
+  const paper = solvePaper(text);
+  if (paper) {
+    if (paper.type === 'match') {
+      const answer = matchAnswer(task.stem, paper.details.formats);
+      if (answer) return [answer];
+    } else if (paper.values) {
+      const outPaper = [];
+      for (const value of paper.values) {
+        for (const candidate of numberCandidates(value)) {
+          if (!outPaper.includes(candidate)) outPaper.push(candidate);
+        }
+      }
+      if (outPaper.length) return outPaper;
+    }
+  }
+
+  // Покупка продуктов: считаем набор в каждом магазине и берём наименьшую сумму.
+  const products = solveProducts(text, task.stem);
+  if (products) {
+    const outProducts = [];
+    for (const candidate of numberCandidates(products.value)) {
+      if (!outProducts.includes(candidate)) outProducts.push(candidate);
+    }
+    if (outProducts.length) return outProducts;
+  }
+
+  // Шины: ответ считается по маркировке; где заводская маркировка не дана,
+  // перебираем возможные маркировки набора (их подтверждает оракул).
+  const tire = solveTire(text, task.stem);
+  if (tire) {
+    const list =
+      tire.value != null
+        ? [tire.value]
+        : tireCandidates(tire, context.markings || [], context.tables || []);
+    if (list.length) {
+      // ФИПИ принимает и запятую, и точку; шлём запятую — так короче перебор.
+      const outTire = [];
+      for (const value of list) {
+        const text = String(Math.round(value * 100) / 100).replace('.', ',');
+        if (!outTire.includes(text)) outTire.push(text);
+      }
+      return outTire.slice(0, 400);
+    }
+  }
 
   // «Найдите значение выражения …» — арифметика, при необходимости с подстановкой
   // значений переменных: «… при a = 7», «… при a = 6 и b = √6».

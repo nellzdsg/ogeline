@@ -464,6 +464,11 @@ function renderTaskScreen(task, group) {
       </div>
 
       <div class="statement">${task.stem}</div>
+      ${
+        task.added
+          ? `<p class="statement-note"><span class="note-tag">условие дополнено</span>${escapeHtml(task.added)}</p>`
+          : ''
+      }
 
       ${task.options ? renderOptions(task, solved) : renderInput(task, solved, failed)}
 
