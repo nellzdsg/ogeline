@@ -11,6 +11,9 @@ import { equationPoly, polyRoots } from '../../build/expr.mjs';
 import { solveTire, tireCandidates } from './tires.mjs';
 import { solvePaper, matchAnswer } from './paper.mjs';
 import { solveProducts } from './products.mjs';
+import { solveProgressions } from './progressions.mjs';
+import { solveProbability } from './probability.mjs';
+import { inlinePictureText } from './pictures.mjs';
 
 const MAX_CANDIDATES = 8;
 const LETTER = 'A-Za-z\\u03b1-\\u03c9';
@@ -39,7 +42,7 @@ const NUM_PAT =
  * (ω, n, R) не терялись — иначе по условию нельзя понять, о какой величине речь.
  */
 export function plainText(html) {
-  let text = String(html);
+  let text = inlinePictureText(html);
   for (const block of extractMathBlocks(text)) {
     const inline = parseFragment(block).children.map(toInlineText).join('');
     text = text.replace(block, () => ` ${inline} `);
@@ -644,6 +647,30 @@ export function candidatesFor(task, context = {}) {
       if (!outProducts.includes(candidate)) outProducts.push(candidate);
     }
     if (outProducts.length) return outProducts;
+  }
+
+  // Вероятность и статистика (номер 10): билеты, такси, монеты, карандаши.
+  const probability = solveProbability(text);
+  if (probability) {
+    const outProbability = [];
+    for (const value of probability.values) {
+      for (const candidate of numberCandidates(value)) {
+        if (!outProbability.includes(candidate)) outProbability.push(candidate);
+      }
+    }
+    if (outProbability.length) return outProbability;
+  }
+
+  // Последовательности и прогрессии (номер 14): ряды, распад, рост, мячик.
+  const progression = solveProgressions(text);
+  if (progression) {
+    const outProgressions = [];
+    for (const value of progression.values) {
+      for (const candidate of numberCandidates(value)) {
+        if (!outProgressions.includes(candidate)) outProgressions.push(candidate);
+      }
+    }
+    if (outProgressions.length) return outProgressions;
   }
 
   // Шины: ответ считается по маркировке; где заводская маркировка не дана,

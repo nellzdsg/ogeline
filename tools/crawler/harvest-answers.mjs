@@ -42,6 +42,39 @@ function combinations(items, size) {
   return result;
 }
 
+/** Все последовательности из `size` различных чисел набора. */
+function permutations(items, size) {
+  const result = [];
+  const walk = (acc, rest) => {
+    if (acc.length === size) {
+      result.push([...acc]);
+      return;
+    }
+    for (let i = 0; i < rest.length; i++) {
+      walk([...acc, rest[i]], [...rest.slice(0, i), ...rest.slice(i + 1)]);
+    }
+  };
+  walk([], items);
+  return result;
+}
+
+/**
+ * Задания «установите соответствие»: под буквами А), Б), В), Г) стоят номера
+ * 1), 2), …. Ответ — последовательность цифр (например «312»).
+ */
+function accordCandidates(stemHtml) {
+  const letters = [
+    ...new Set([...String(stemHtml).matchAll(/<b>\s*([А-ЯA-Z])\s*\)\s*<\/b>/g)].map((m) => m[1])),
+  ];
+  const numbers = [
+    ...new Set([...String(stemHtml).matchAll(/<b>\s*(\d+)\s*\)\s*<\/b>/g)].map((m) => Number(m[1]))),
+  ];
+  if (!letters.length || !numbers.length || letters.length > numbers.length) return [];
+  const size = letters.length;
+  const all = permutations(numbers, size).map((p) => p.join(''));
+  return all.length <= 200 ? all : [];
+}
+
 /** Подбирает ответ: перебором вариантов или вычислением + проверкой. */
 async function harvestAnswer(proj, task, markings, tables) {
   if (task.kind === 'short') {
@@ -54,7 +87,17 @@ async function harvestAnswer(proj, task, markings, tables) {
     return null;
   }
 
-  if (!task.options) return null;
+  if (!task.options && task.kind !== 'accord') return null;
+
+  if (task.kind === 'accord') {
+    for (const candidate of accordCandidates(task.stem)) {
+      if (await checkAnswer(proj, task.guid, candidate)) {
+        return { answer: candidate, method: 'перебор соответствий' };
+      }
+    }
+    return null;
+  }
+
   const numbers = task.options.map((o) => o.n);
 
   if (task.kind === 'choice') {

@@ -26,7 +26,8 @@ const CA = [...tls.rootCertificates, extraCa];
 
 const cookies = new Map();
 let lastRequestAt = 0;
-const MIN_DELAY_MS = 400;
+/** Пауза между запросами. Перебор ответов идёт медленнее — банк этого не любит. */
+const MIN_DELAY_MS = Number(process.env.FIPI_DELAY_MS || 400);
 
 async function throttle() {
   const wait = MIN_DELAY_MS - (Date.now() - lastRequestAt);

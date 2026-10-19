@@ -124,6 +124,10 @@ export function groupOf(subjectKey, task) {
   if (kes.some((k) => k.startsWith('3.3'))) return '1-5';
   if (kes.some((k) => k.startsWith('3.1'))) return '9';
   if (kes.some((k) => k.startsWith('3.2'))) return '13';
+  if (kes.some((k) => k.startsWith('4.'))) return '14';
+  if (kes.some((k) => k.startsWith('8.'))) return '10';
+  if (kes.some((k) => k.startsWith('5.')) || kes.some((k) => k.startsWith('6.2'))) return '11';
+  if (kes.some((k) => k.startsWith('7.'))) return geometryNumber(plainStem(task.stem));
 
   const theme = String(task.theme);
   if (theme === '2') return '8-12';
@@ -133,5 +137,19 @@ export function groupOf(subjectKey, task) {
     if (kes.some((k) => k.startsWith('6.'))) return '7';
     return '6';
   }
+  if (kes.some((k) => k.startsWith('6.'))) return '7';
   return null;
+}
+
+/**
+ * Номер геометрического задания. В банке все они помечены кодом 7.x, который
+ * не различает позиции 15–19, поэтому опираемся на сюжет: он в спецификации
+ * ОГЭ привязан к позиции довольно жёстко.
+ */
+function geometryNumber(text) {
+  if (/верн(ое|ые|ых)\s+утверждени|выберите\s+верн|укажите\s+номер\s+верн/i.test(text)) return '19';
+  if (/клетчат/i.test(text)) return '18';
+  if (/площад|объ[её]м/i.test(text)) return '17';
+  if (/окружност|\bкруг|касательн|хорд|вписан|описан|\bдуг|радиус|диаметр/i.test(text)) return '16';
+  return '15';
 }

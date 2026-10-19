@@ -42,6 +42,7 @@ import {
 } from '../crawler/lib/tires.mjs';
 import { solvePaper, matchAnswer, formatSize } from '../crawler/lib/paper.mjs';
 import { solveProducts } from '../crawler/lib/products.mjs';
+import { solveProgressions } from '../crawler/lib/progressions.mjs';
 import {
   analyzeFormula,
   evalExpr,
@@ -2099,6 +2100,168 @@ function solveProductsExplain(task, text) {
   };
 }
 
+// --- последовательности и прогрессии (номер 14) -------------------------------
+
+function solveProgressionsExplain(task, text) {
+  const solved = solveProgressions(text);
+  if (!solved) return null;
+
+  const d = solved.details;
+  const answer = solved.values[0];
+
+  if (solved.type === 'arith-rows') {
+    const [firstHint] =
+      [
+        'Места в рядах образуют арифметическую прогрессию: в каждом следующем ряду мест больше на одно и то же число.',
+      ];
+
+    const hints = [firstHint];
+    const steps = [];
+
+    if (d.known) {
+      const [[k1, v1], [k2, v2]] = d.known;
+      hints.push(`Известны ${k1}-й и ${k2}-й члены прогрессии: ${v1} и ${v2}. Из них находится разность.`);
+      hints.push('Разность — это разница значений, делённая на разницу номеров. Посчитайте d, затем нужный член или сумму.');
+      steps.push(`По условию a${k1} = ${fmt(v1)}, a${k2} = ${fmt(v2)}.`);
+      steps.push(
+        `Разность прогрессии: d = (a${k2} − a${k1}) / (${k2} − ${k1}) = (${fmt(v2)} − ${fmt(v1)}) / ${k2 - k1} = ${fmt(d.d)}.`,
+      );
+      steps.push(`Первый член: a₁ = a${k1} − ${k1 - 1} · d = ${fmt(v1)} − ${k1 - 1} · ${fmt(d.d)} = ${fmt(d.a1)}.`);
+    } else {
+      hints.push(`Первый ряд — это a₁ = ${fmt(d.a1)}, разность прогрессии d = ${fmt(d.d)}.`);
+      hints.push(
+        d.wantTotal
+          ? 'Всего мест — это сумма первых n членов прогрессии.'
+          : 'Места в последнем ряду — это n-й член прогрессии.',
+      );
+      steps.push(`Первый член a₁ = ${fmt(d.a1)}, разность d = ${fmt(d.d)}, всего рядов n = ${d.n}.`);
+    }
+
+    if (d.wantTotal) {
+      const sum = (2 * d.a1 + d.d * (d.n - 1)) * d.n / 2;
+      steps.push(
+        `Сумма n членов: S = (2a₁ + d · (n − 1)) · n / 2 = (2 · ${fmt(d.a1)} + ${fmt(d.d)} · ${d.n - 1}) · ${d.n} / 2 = ${fmt(sum)}.`,
+      );
+    } else {
+      const last = d.a1 + (d.n - 1) * d.d;
+      steps.push(`n-й член: a_n = a₁ + (n − 1) · d = ${fmt(d.a1)} + ${d.n - 1} · ${fmt(d.d)} = ${fmt(last)}.`);
+    }
+    steps.push(`Ответ: ${fmt(answer)}.`);
+
+    return { prototype: 'progression-rows', hints, steps, answer: fmt(answer) };
+  }
+
+  if (solved.type === 'arith-motion') {
+    const sign = d.d < 0 ? 'меньше' : 'больше';
+    const hints = [
+      'Путь за каждую секунду образует арифметическую прогрессию: разность постоянна.',
+      `Первый член a₁ = ${fmt(d.a1)} м, разность d = ${fmt(d.d)} м (каждую секунду ${sign} на ${fmt(Math.abs(d.d))} м).`,
+      d.stop
+        ? 'Машина останавливается, когда путь за очередную секунду перестаёт быть положительным. Сложите все такие секунды — это сумма членов прогрессии.'
+        : d.wantTotal
+          ? `Нужна сумма первых ${d.n} членов: S = (2a₁ + d · (n − 1)) · n / 2.`
+          : `Нужен ${d.n}-й член прогрессии: a_n = a₁ + (n − 1) · d.`,
+    ];
+    const steps = [
+      `Разбираем движение по секундам: a₁ = ${fmt(d.a1)} м, d = ${fmt(d.d)} м, n = ${d.n}.`,
+    ];
+    if (d.stop) {
+      steps.push(
+        `Путь за секунды: ${Array.from({ length: d.n }, (_, i) => fmt(d.a1 + i * d.d)).join(', ')} м.`,
+      );
+      steps.push(`Сумма: ${fmt(d.total)} м.`);
+    } else if (d.wantTotal) {
+      steps.push(
+        `S = (2 · ${fmt(d.a1)} + (${fmt(d.d)}) · ${d.n - 1}) · ${d.n} / 2 = ${fmt(d.total)} м.`,
+      );
+    } else {
+      steps.push(`a_${d.n} = ${fmt(d.a1)} + ${d.n - 1} · (${fmt(d.d)}) = ${fmt(d.last)} м.`);
+    }
+    steps.push(`Ответ: ${fmt(answer)}.`);
+    return { prototype: 'progression-motion', hints, steps, answer: fmt(answer) };
+  }
+
+  if (solved.type === 'geom-decay') {
+    return {
+      prototype: 'progression-decay',
+      hints: [
+        'Масса уменьшается в одно и то же число раз через равные промежутки — это геометрическая прогрессия.',
+        `За каждые ${fmt(d.period)} мин масса делится на 2, значит q = 1/2.`,
+        `Всего прошло ${fmt(d.elapsed)} мин, это ${fmt(d.steps)} таких промежутков: масса равна b₁ · (1/2)^n.`,
+      ],
+      steps: [
+        `Начальная масса b₁ = ${fmt(d.start)} ${d.unit}.`,
+        `Промежутков по ${fmt(d.period)} мин в ${fmt(d.elapsed)} мин: n = ${fmt(d.elapsed)} / ${fmt(d.period)} = ${fmt(d.steps)}.`,
+        `b = ${fmt(d.start)} / 2^${fmt(d.steps)} = ${fmt(d.value)} ${d.unit}.`,
+        `Ответ: ${fmt(answer)}.`,
+      ],
+      answer: fmt(answer),
+    };
+  }
+
+  if (solved.type === 'geom-growth') {
+    return {
+      prototype: 'progression-growth',
+      hints: [
+        'Масса растёт в одно и то же число раз через равные промежутки — это геометрическая прогрессия.',
+        `За каждые ${fmt(d.period)} мин масса умножается на ${fmt(d.factor)}, значит q = ${fmt(d.factor)}.`,
+        `Всего прошло ${fmt(d.elapsed)} мин — это ${fmt(d.steps)} промежутков: масса равна b₁ · q^n.`,
+      ],
+      steps: [
+        `Начальная масса b₁ = ${fmt(d.start)} ${d.unit}.`,
+        `n = ${fmt(d.elapsed)} / ${fmt(d.period)} = ${fmt(d.steps)}.`,
+        `b = ${fmt(d.start)} · ${fmt(d.factor)}^${fmt(d.steps)} = ${fmt(d.value)} ${d.unit}.`,
+        `Ответ: ${fmt(answer)}.`,
+      ],
+      answer: fmt(answer),
+    };
+  }
+
+  if (solved.type === 'geom-ball') {
+    const heights = [];
+    let height = d.h0;
+    for (let i = 1; i <= d.jump; i++) {
+      if (i > 1) height /= d.factor;
+      heights.push(`${i}-й — ${fmt(height)} м`);
+      if (i > 4 && i < d.jump) break;
+    }
+    return {
+      prototype: 'progression-ball',
+      hints: [
+        'Высоты прыжков уменьшаются в одно и то же число раз — это геометрическая прогрессия со знаменателем меньше единицы.',
+        `Первый прыжок: ${fmt(d.h0)} м, каждый следующий в ${fmt(d.factor)} раза ниже.`,
+        `Порог — ${fmt(d.threshold * 100)} см. Делите высоту на ${fmt(d.factor)}, пока очередная не станет меньше порога.`,
+      ],
+      steps: [
+        `Высоты прыжков: ${heights.join('; ')}.`,
+        `На ${d.jump}-м прыжке высота впервые меньше ${fmt(d.threshold * 100)} см (${fmt(d.height)} м).`,
+        `Ответ: ${fmt(answer)}.`,
+      ],
+      answer: fmt(answer),
+    };
+  }
+
+  if (solved.type === 'arith-cooling') {
+    return {
+      prototype: 'progression-cooling',
+      hints: [
+        'Температура меняется на одно и то же число градусов каждую минуту — это арифметическая прогрессия.',
+        `Каждую минуту температура уменьшается на ${fmt(d.drop)} °C.`,
+        `За ${d.n} мин температура уменьшится на ${d.n} · ${fmt(d.drop)} = ${fmt(d.n * d.drop)} °C.`,
+      ],
+      steps: [
+        `Начальная температура ${fmt(d.start)} °C.`,
+        `За ${d.n} минут температура упадёт на ${d.n} · ${fmt(d.drop)} = ${fmt(d.n * d.drop)} °C.`,
+        `${fmt(d.start)} − ${fmt(d.n * d.drop)} = ${fmt(answer)} °C.`,
+        `Ответ: ${fmt(answer)}.`,
+      ],
+      answer: fmt(answer),
+    };
+  }
+
+  return null;
+}
+
 export function describe(task) {
   const text = fixNumberText(plainText(task.stem));
   const kind = task.kind;
@@ -2115,6 +2278,10 @@ export function describe(task) {
     // Покупка продуктов в одном из магазинов (номера 1–5).
     const products = solveProductsExplain(task, text);
     if (products) return products;
+
+    // Последовательности и прогрессии (номер 14).
+    const progression = solveProgressionsExplain(task, text);
+    if (progression) return progression;
 
     const { knowns, literals } = taskValues(task, text);
     const expr = formulas(task.stem).find((e) => !e.includes('='));
