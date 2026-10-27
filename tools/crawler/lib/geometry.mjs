@@ -26,6 +26,19 @@ const toFrac = (raw) => {
   return m ? Number(m[1]) / Number(m[2]) : toNum(s);
 };
 
+/** Число с корнем в любой записи: «14 √(2)», «√(5)/2», «√(10)». */
+const toNumFlex = (raw) => {
+  const s = String(raw).replace(/\s+/g, '').replace(',', '.');
+  const div = /^√\((\d+)\)\/(\d+)$/.exec(s);
+  if (div) return Math.sqrt(Number(div[1])) / Number(div[2]);
+  const root = /^√\((\d+)\)$/.exec(s);
+  if (root) return Math.sqrt(Number(root[1]));
+  return toNum(s);
+};
+
+/** Шаблон такого числа — для регулярных выражений. */
+const NUM_FLEX = String.raw`(?:\d+(?:[.,]\d+)?\s*)?√\(\d+\)(?:\/\d+)?|\d+(?:[.,]\d+)?`;
+
 const round = (v, digits = 6) => Math.round(v * 10 ** digits) / 10 ** digits;
 
 /** Ответ в формате ОГЭ: целое или десятичная дробь с запятой. */
@@ -44,12 +57,16 @@ function norm(text) {
     .trim();
 }
 
-/** Все названные в условии углы: «∠ABC = 48», «угол C равен 120». */
+/** Все названные в условии углы: «∠ABC = 48», «угол C равен 120», «Угол ABD равен 51». */
 function anglesOf(text) {
   const map = new Map();
-  for (const m of text.matchAll(/∠\s*([A-Z]{1,4})\s*=\s*(\d+(?:[.,]\d+)?)/g)) map.set(m[1], toNum(m[2]));
-  for (const m of text.matchAll(/угол\s+([A-Z]{1,4})\s+равен\s+(\d+(?:[.,]\d+)?)/g)) {
-    if (!map.has(m[1])) map.set(m[1], toNum(m[2]));
+  for (const m of text.matchAll(/∠\s*([A-Za-z]{1,4})\s*=\s*(\d+(?:[.,]\d+)?)/g)) {
+    map.set(m[1].toUpperCase(), toNum(m[2]));
+  }
+  // «Угол» в начале предложения пишется с большой буквы, поэтому регистр не важен.
+  for (const m of text.matchAll(/угол\s+([A-Za-z]{1,4})\s+равен\s+(\d+(?:[.,]\d+)?)/gi)) {
+    const name = m[1].toUpperCase();
+    if (!map.has(name)) map.set(name, toNum(m[2]));
   }
   return map;
 }
@@ -218,7 +235,7 @@ export function solveGeometry(rawText) {
   }
 
   // --- окружность: AB — диаметр (центр на стороне AB) ------------------------
-  if (/Центр окружности, описанной около треугольника ABC, лежит на стороне AB/i.test(text)) {
+  if (/Центр окружности, описанной около треугольника ABC\s*,?\s*лежит на стороне AB/i.test(text)) {
     const r = /радиус окружности равен (\d+(?:[.,]\d+)?)/i.exec(text);
     const bac = a.get('BAC');
     if (r) {
@@ -1285,10 +1302,10 @@ export function solveGeometry(rawText) {
   }
 
   // --- равносторонний треугольник ------------------------------------------
-  if (/равностороннего треугольника/i.test(text)) {
-    const sideGiven = /Сторона равностороннего треугольника равна (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
+  if (/равносторонн[а-яё]* треугольник[а-яё]*/i.test(text)) {
+    const sideGiven = /Сторона равносторонн[а-яё]* треугольник[а-яё]* равна (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
     const rGiven = /Радиус окружности, (?:описанной|вписанной)[^.]*?равен (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
-    const hGiven = /Высота равностороннего треугольника равна (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
+    const hGiven = /Высота равносторонн[а-яё]* треугольник[а-яё]* равна (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
 
     if (sideGiven && /радиус окружности, описанной/i.test(text)) {
       const side = toNum(sideGiven[1]);
@@ -1320,16 +1337,23 @@ export function solveGeometry(rawText) {
     }
     if (rGiven && /Найдите длину стороны/i.test(text)) {
       const radius = toNum(rGiven[1]);
-      const value = radius * Math.sqrt(3);
+      const inscribed = /Радиус окружности, вписанной/i.test(text);
+      const value = inscribed ? 2 * radius * Math.sqrt(3) : radius * Math.sqrt(3);
       return simple(
-        'equilateral-side-from-circumradius',
+        inscribed ? 'equilateral-side-from-inradius' : 'equilateral-side-from-circumradius',
         value,
-        [
-          'У равностороннего треугольника R = a / √3, значит a = R√3.',
-          `R = ${fmt(radius)}.`,
-          `a = ${fmt(radius)} · √3 = ${fmt(round(value))}.`,
-        ],
-        [`a = R√3 = ${fmt(round(value))}.`, `Ответ: ${fmt(round(value))}.`],
+        inscribed
+          ? [
+              'У равностороннего треугольника r = a√3 / 6, значит a = 2r√3.',
+              `r = ${fmt(radius)}.`,
+              `a = 2 · ${fmt(radius)} · √3 = ${fmt(round(value))}.`,
+            ]
+          : [
+              'У равностороннего треугольника R = a / √3, значит a = R√3.',
+              `R = ${fmt(radius)}.`,
+              `a = ${fmt(radius)} · √3 = ${fmt(round(value))}.`,
+            ],
+        [inscribed ? `a = 2r√3 = ${fmt(round(value))}.` : `a = R√3 = ${fmt(round(value))}.`, `Ответ: ${fmt(round(value))}.`],
       );
     }
     if (hGiven && /Найдите сторону/i.test(text)) {
@@ -1393,6 +1417,480 @@ export function solveGeometry(rawText) {
           `h = ${fmt(diff)} · tg ${fmt(angleDeg)}° = ${fmt(round(value))}.`,
           `Ответ: ${fmt(round(value))}.`,
         ],
+      );
+    }
+  }
+
+  // --- равносторонний треугольник: сторона → высота, медиана, биссектриса --
+  if (/равносторонн[а-яё]* треугольник[а-яё]*/i.test(text)) {
+    const side = /Сторона равносторонн[а-яё]* треугольник[а-яё]* равна (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
+    const hGiven = /(?:Высота|Биссектриса|Медиана) равносторонн[а-яё]* треугольник[а-яё]* равна (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
+    const rGiven = /Радиус окружности, вписанной[^.]*?равен (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
+    if (side && /Найдите (медиану|высоту|биссектрису)/i.test(text)) {
+      const a = toNum(side[1]);
+      const value = (a * Math.sqrt(3)) / 2;
+      return simple(
+        'equilateral-altitude',
+        value,
+        [
+          'В равностороннем треугольнике высота, медиана и биссектриса совпадают.',
+          `h = a√3 / 2, где a — сторона.`,
+          `h = ${fmt(a)} · √3 / 2 = ${fmt(round(value))}.`,
+        ],
+        [`h = a√3 / 2 = ${fmt(round(value))}.`, `Ответ: ${fmt(round(value))}.`],
+      );
+    }
+    if (hGiven && /Найдите сторону/i.test(text)) {
+      const h = toNum(hGiven[1]);
+      const value = (2 * h) / Math.sqrt(3);
+      return simple(
+        'equilateral-side-from-height',
+        value,
+        [
+          'Высота (она же медиана и биссектриса) равностороннего треугольника: h = a√3 / 2.',
+          `Значит, a = 2h / √3.`,
+          `a = 2 · ${fmt(h)} / √3 = ${fmt(round(value))}.`,
+        ],
+        [`a = 2h / √3 = ${fmt(round(value))}.`, `Ответ: ${fmt(round(value))}.`],
+      );
+    }
+  }
+
+  // --- трапеция, вписанная в окружность: противоположные углы --------------
+  if (/вписанной в окружность/i.test(text) && /Угол A трапеции/i.test(text)) {
+    const raw = /Угол A трапеции[^.]*?равен (\d+(?:[.,]\d+)?)/i.exec(text);
+    const known = raw ? toNum(raw[1]) : a.get('A');
+    const want = /Найдите угол ([BCD])/i.exec(text);
+    if (known != null && want) {
+      const value = 180 - known;
+      return simple(
+        'trapezoid-inscribed-opposite',
+        value,
+        [
+          'Трапецию можно вписать в окружность только тогда, когда она равнобедренная.',
+          'У вписанного четырёхугольника сумма противоположных углов равна 180°.',
+          `∠${want[1]} = 180° − ${fmt(known)}° = ${fmt(value)}°.`,
+        ],
+        [
+          `∠A + ∠C = 180°, а у равнобедренной трапеции ∠B = ∠C.`,
+          `∠${want[1]} = 180° − ${fmt(known)}° = ${fmt(value)}°.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- квадрат: точка на середине стороны и радиус окружности ---------------
+  if (/Точка O является серединой стороны CD квадрата/i.test(text)) {
+    const radius = new RegExp(String.raw`Радиус окружности[^.]*?равен (${NUM_FLEX})`, 'i').exec(text);
+    if (radius && /Найдите площадь квадрата/i.test(text)) {
+      const r = toNumFlex(radius[1]);
+      const value = (4 * r * r) / 5;
+      return simple(
+        'square-midpoint-radius-area',
+        value,
+        [
+          'Пусть сторона квадрата равна a. Середина стороны CD удалена от вершины A на √((a/2)² + a²) = a√5 / 2.',
+          `Значит, a = 2R / √5, а площадь S = a² = 4R² / 5.`,
+          `S = 4 · ${fmt(r)}² / 5 = ${fmt(round(value))}.`,
+        ],
+        [
+          `R = a√5 / 2, поэтому a² = 4R² / 5.`,
+          `S = 4 · ${fmt(r)}² / 5 = ${fmt(round(value))}.`,
+          `Ответ: ${fmt(round(value))}.`,
+        ],
+      );
+    }
+  }
+
+  // --- высота из конца меньшего основания делит большее на отрезки ---------
+  if (/Высота равнобедренной трапеции, проведённая из конца её меньшего основания/i.test(text)) {
+    const parts = /отрезки длиной (\d+(?:[.,]\d+)?) и (\d+(?:[.,]\d+)?)/i.exec(text);
+    if (parts && /Найдите меньшее основание/i.test(text)) {
+      const p = toNum(parts[1]);
+      const q = toNum(parts[2]);
+      const value = Math.abs(q - p);
+      return simple(
+        'trapezoid-smaller-base',
+        value,
+        [
+          'Высота из конца меньшего основания отсекает от большего основания отрезок, равный меньшему основанию, и два равных отрезка по краям.',
+          `Меньшее основание равно разности отрезков: ${fmt(Math.max(p, q))} − ${fmt(Math.min(p, q))}.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+        [
+          `Отрезки ${fmt(p)} и ${fmt(q)} — это часть, равная меньшему основанию, и его «хвост».`,
+          `Меньшее основание = ${fmt(Math.max(p, q))} − ${fmt(Math.min(p, q))} = ${fmt(value)}.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- биссектриса диагонали в равнобедренной трапеции ---------------------
+  if (/луч AC является биссектрисой угла BAD/i.test(text)) {
+    const d = a.get('D');
+    if (d != null) {
+      const value = 180 - 1.5 * d;
+      return simple(
+        'trapezoid-diagonal-bisector',
+        value,
+        [
+          'У равнобедренной трапеции углы при основании AD равны: ∠BAD = ∠ADC.',
+          'Биссектриса делит ∠BAD пополам, значит ∠CAD = ∠BAD / 2.',
+          `В треугольнике ACD: ∠ACD = 180° − ${fmt(d)}° − ${fmt(d / 2)}° = ${fmt(value)}°.`,
+        ],
+        [
+          `∠BAD = ∠D = ${fmt(d)}°, ∠CAD = ${fmt(d / 2)}°.`,
+          `∠ACD = 180° − ${fmt(d)}° − ${fmt(d / 2)}° = ${fmt(value)}°.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- ромб: перпендикуляр из центра к стороне ------------------------------
+  if (/Перпендикуляр, проведённый из точки пересечения диагоналей ромба/i.test(text)) {
+    const given = /угол (\d+(?:[.,]\d+)?)/i.exec(text);
+    if (given) {
+      const x = toNum(given[1]);
+      const value = 2 * x;
+      return simple(
+        'rhombus-perpendicular-angle',
+        value,
+        [
+          'Диагонали ромба перпендикулярны и делят его углы пополам.',
+          'В прямоугольном треугольнике, образованном половинами диагоналей и стороной, угол между перпендикуляром и диагональю равен половине острого угла ромба.',
+          `Острый угол ромба = 2 · ${fmt(x)}° = ${fmt(value)}°.`,
+        ],
+        [
+          `Угол между перпендикуляром и диагональю равен половине острого угла ромба.`,
+          `Острый угол = 2 · ${fmt(x)}° = ${fmt(value)}°.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- прямоугольник: синус угла между стороной и диагональю ---------------
+  if (/Синус угла между стороной и диагональю прямоугольника равен/i.test(text)) {
+    const sinRaw = /Синус угла между стороной и диагональю прямоугольника равен (\d+(?:[.,]\d+)?)/i.exec(text);
+    const diamRaw = /Диаметр описанной[^.]*?равен (\d+(?:[.,]\d+)?)/i.exec(text);
+    if (sinRaw && diamRaw && /Найдите площадь/i.test(text)) {
+      const s = toNum(sinRaw[1]);
+      const diam = toNum(diamRaw[1]);
+      const value = diam * diam * s * Math.sqrt(Math.max(0, 1 - s * s));
+      return simple(
+        'rectangle-area-by-sin',
+        value,
+        [
+          'Диаметр описанной около прямоугольника окружности равен его диагонали.',
+          'Стороны прямоугольника: d·sin α и d·cos α, где α — угол между диагональю и стороной.',
+          `S = d² · sin α · cos α = ${fmt(diam)}² · ${fmt(s)} · ${fmt(Math.sqrt(1 - s * s))} = ${fmt(round(value))}.`,
+        ],
+        [
+          `Стороны: ${fmt(diam)} · ${fmt(s)} и ${fmt(diam)} · ${fmt(round(Math.sqrt(1 - s * s)))}.`,
+          `S = ${fmt(round(value))}.`,
+          `Ответ: ${fmt(round(value))}.`,
+        ],
+      );
+    }
+  }
+
+  // --- прямоугольник: диагонали точкой пересечения делятся пополам ----------
+  if (/Диагонали AC и BD прямоугольника ABCD пересекаются в точке O/i.test(text)) {
+    const half = /(?:BO|AO|CO|DO) = (\d+(?:[.,]\d+)?)/i.exec(text);
+    const want = /Найдите (AC|BD)/i.exec(text);
+    if (half && want) {
+      const value = 2 * toNum(half[1]);
+      return simple(
+        'rectangle-diagonal',
+        value,
+        [
+          'Диагонали прямоугольника равны и точкой пересечения делятся пополам.',
+          `Половина диагонали равна ${fmt(toNum(half[1]))}.`,
+          `${want[1]} = 2 · ${fmt(toNum(half[1]))} = ${fmt(value)}.`,
+        ],
+        [`${want[1]} = 2 · ${fmt(toNum(half[1]))} = ${fmt(value)}.`, `Ответ: ${fmt(value)}.`],
+      );
+    }
+  }
+
+  // --- трапеция, описанная около окружности --------------------------------
+  if (/описана около окружности/i.test(text) && /Найдите AD/i.test(text)) {
+    const ab = /AB = (\d+(?:[.,]\d+)?)/.exec(text);
+    const bc = /BC = (\d+(?:[.,]\d+)?)/.exec(text);
+    const cd = /CD = (\d+(?:[.,]\d+)?)/.exec(text);
+    if (ab && bc && cd) {
+      const value = toNum(ab[1]) + toNum(cd[1]) - toNum(bc[1]);
+      return simple(
+        'trapezoid-circumscribed-side',
+        value,
+        [
+          'В четырёхугольник можно вписать окружность тогда и только тогда, когда суммы противоположных сторон равны.',
+          `AB + CD = BC + AD.`,
+          `AD = ${fmt(toNum(ab[1]))} + ${fmt(toNum(cd[1]))} − ${fmt(toNum(bc[1]))} = ${fmt(value)}.`,
+        ],
+        [
+          `AB + CD = ${fmt(toNum(ab[1]) + toNum(cd[1]))}, BC = ${fmt(toNum(bc[1]))}.`,
+          `AD = ${fmt(toNum(ab[1]) + toNum(cd[1]))} − ${fmt(toNum(bc[1]))} = ${fmt(value)}.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- площадь треугольника через две стороны и синус угла между ними ------
+  if (/sin\s*∠\s*ABC\s*=/i.test(text) && /Найдите площадь треугольника/i.test(text)) {
+    const ab = /AB = (\d+(?:[.,]\d+)?)/.exec(text);
+    const bc = /BC = (\d+(?:[.,]\d+)?)/.exec(text);
+    const sinRaw = /sin\s*∠\s*ABC\s*=\s*(\d+\/\d+|\d+(?:[.,]\d+)?)/i.exec(text);
+    if (ab && bc && sinRaw) {
+      const s = toFrac(sinRaw[1]);
+      const value = 0.5 * toNum(ab[1]) * toNum(bc[1]) * s;
+      return simple(
+        'triangle-area-by-sin',
+        value,
+        [
+          'Площадь треугольника равна половине произведения двух сторон на синус угла между ними.',
+          `S = ½ · AB · BC · sin∠ABC.`,
+          `S = 0,5 · ${fmt(toNum(ab[1]))} · ${fmt(toNum(bc[1]))} · ${fmt(s)} = ${fmt(round(value))}.`,
+        ],
+        [
+          `S = ½ · ${fmt(toNum(ab[1]))} · ${fmt(toNum(bc[1]))} · ${fmt(s)}.`,
+          `S = ${fmt(round(value))}.`,
+          `Ответ: ${fmt(round(value))}.`,
+        ],
+      );
+    }
+  }
+
+  // --- диагональ параллелограмма образует углы со сторонами ----------------
+  if (/Диагональ [A-Z]{2} параллелограмма ABCD образует с его сторонами углы/i.test(text)) {
+    const pair = /углы, равные (\d+(?:[.,]\d+)?)\s*°?\s*и\s+(\d+(?:[.,]\d+)?)/i.exec(text);
+    if (pair) {
+      const sum = toNum(pair[1]) + toNum(pair[2]);
+      const smaller = Math.min(sum, 180 - sum);
+      const value = /меньший угол/i.test(text) ? smaller : 180 - smaller;
+      return simple(
+        'parallelogram-diagonal-angles',
+        value,
+        [
+          'Диагональ делит угол параллелограмма на два угла, которые она образует с его сторонами.',
+          `Угол параллелограмма равен сумме: ${fmt(toNum(pair[1]))}° + ${fmt(toNum(pair[2]))}° = ${fmt(sum)}°.`,
+          `Соседний угол: 180° − ${fmt(sum)}° = ${fmt(180 - sum)}°. Искомый — ${/меньший угол/i.test(text) ? 'меньший' : 'больший'}: ${fmt(value)}°.`,
+        ],
+        [
+          `Угол параллелограмма = ${fmt(sum)}°.`,
+          `Второй угол = ${fmt(180 - sum)}°.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- квадрат: радиус вписанной окружности и диагональ --------------------
+  if (/Радиус вписанной в квадрат окружности равен/i.test(text)) {
+    const rRaw = /Радиус вписанной в квадрат окружности равен (\d+(?:[.,]\d+)?(?:\s*√\(\d+\))?)/i.exec(text);
+    if (rRaw && /Найдите диагональ/i.test(text)) {
+      const r = toNum(rRaw[1]);
+      const value = 2 * r * Math.SQRT2;
+      return simple(
+        'square-diagonal-from-inradius',
+        value,
+        [
+          'Радиус вписанной в квадрат окружности равен половине стороны: r = a / 2.',
+          'Диагональ квадрата: d = a√2 = 2r√2.',
+          `d = 2 · ${fmt(r)} · √2 = ${fmt(round(value))}.`,
+        ],
+        [`a = 2r = ${fmt(2 * r)}, d = a√2 = ${fmt(round(value))}.`, `Ответ: ${fmt(round(value))}.`],
+      );
+    }
+  }
+
+  // --- равнобедренная трапеция: диагональ и боковые стороны ----------------
+  if (/Диагональ равнобедренной трапеции образует с боковыми сторонами углы/i.test(text)) {
+    const pair = /углы (\d+(?:[.,]\d+)?)\s*°?\s*и\s+(\d+(?:[.,]\d+)?)/i.exec(text);
+    if (pair) {
+      const p = toNum(pair[1]);
+      const q = toNum(pair[2]);
+      const value = 90 - Math.abs(p - q) / 2;
+      return simple(
+        'trapezoid-diagonal-sides-angle',
+        value,
+        [
+          'Обозначим угол при большем основании через α.',
+          'Диагональ равнобедренной трапеции образует с боковыми сторонами углы, разность которых равна 180° − 2α.',
+          `α = 90° − |${fmt(p)}° − ${fmt(q)}°| / 2 = ${fmt(value)}°.`,
+        ],
+        [
+          `Разность данных углов: |${fmt(p)} − ${fmt(q)}| = ${fmt(Math.abs(p - q))}°.`,
+          `α = 90° − ${fmt(Math.abs(p - q))}° / 2 = ${fmt(value)}°.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- равнобедренная трапеция: угол D и угол диагонали со стороной ---------
+  if (/В равнобедренной трапеции с основаниями AD и BC угол D равен/i.test(text)) {
+    const d = a.get('D');
+    const viaAb = /Диагональ AC образует со стороной AB угол (\d+(?:[.,]\d+)?)/i.exec(text);
+    const viaCd = /Диагональ AC образует со стороной [CС]\s*D угол (\d+(?:[.,]\d+)?)/i.exec(text);
+    if (d != null && (viaAb || viaCd) && /меньшим основанием/i.test(text)) {
+      const y = toNum((viaAb || viaCd)[1]);
+      const value = viaAb ? d - y : 180 - d - y;
+      return simple(
+        'trapezoid-diagonal-smaller-base',
+        value,
+        [
+          'У равнобедренной трапеции углы при основании AD равны: ∠BAD = ∠ADC = ∠D.',
+          'Угол между диагональю и меньшим основанием BC равен углу между диагональю и AD (накрест лежащие).',
+          viaAb
+            ? `∠CAD = ∠BAD − ∠BAC = ${fmt(d)}° − ${fmt(y)}° = ${fmt(value)}°.`
+            : `В треугольнике ACD: ∠CAD = 180° − ${fmt(d)}° − ${fmt(y)}° = ${fmt(value)}°.`,
+        ],
+        [
+          viaAb
+            ? `∠CAD = ${fmt(d)}° − ${fmt(y)}° = ${fmt(value)}°.`
+            : `∠CAD = 180° − ${fmt(d)}° − ${fmt(y)}° = ${fmt(value)}°.`,
+          `Накрест лежащий угол при меньшем основании равен ${fmt(value)}°.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- равнобедренная трапеция: основания и угол при основании -------------
+  if (/В равнобедренной трапеции основания равны/i.test(text) && /Найдите площадь/i.test(text)) {
+    const bases = /основания равны (\d+(?:[.,]\d+)?) и (\d+(?:[.,]\d+)?)/i.exec(text);
+    const ang = /угл[а-яё]*[^.]*?равен (\d+(?:[.,]\d+)?)/i.exec(text);
+    if (bases && ang) {
+      const p = toNum(bases[1]);
+      const q = toNum(bases[2]);
+      const big = Math.max(p, q);
+      const small = Math.min(p, q);
+      const h = ((big - small) / 2) * Math.tan((toNum(ang[1]) * Math.PI) / 180);
+      const value = ((big + small) / 2) * h;
+      return simple(
+        'trapezoid-area-by-angle',
+        value,
+        [
+          'Высота равнобедренной трапеции: h = ((большее основание − меньшее) / 2) · tg α.',
+          `h = (${fmt(big)} − ${fmt(small)}) / 2 · tg ${fmt(toNum(ang[1]))}° = ${fmt(round(h))}.`,
+          `S = (a + b) / 2 · h = ${fmt(round(value))}.`,
+        ],
+        [
+          `h = ${fmt(round(h))}.`,
+          `S = ${fmt((big + small) / 2)} · ${fmt(round(h))} = ${fmt(round(value))}.`,
+          `Ответ: ${fmt(round(value))}.`,
+        ],
+      );
+    }
+  }
+
+  // --- сумма углов треугольника --------------------------------------------
+  if (/В треугольнике два угла равны/i.test(text) && /Найдите его третий угол/i.test(text)) {
+    const pair = /два угла равны (\d+(?:[.,]\d+)?)\s*°?\s*и\s+(\d+(?:[.,]\d+)?)/i.exec(text);
+    if (pair) {
+      const p = toNum(pair[1]);
+      const q = toNum(pair[2]);
+      const value = 180 - p - q;
+      return simple(
+        'triangle-third-angle',
+        value,
+        [
+          'Сумма углов треугольника равна 180°.',
+          `Два угла известны: ${fmt(p)}° и ${fmt(q)}°.`,
+          `Третий угол: 180° − ${fmt(p)}° − ${fmt(q)}° = ${fmt(value)}°.`,
+        ],
+        [`180° − ${fmt(p)}° − ${fmt(q)}° = ${fmt(value)}°.`, `Ответ: ${fmt(value)}.`],
+      );
+    }
+  }
+
+  // --- ромб: угол между стороной и меньшей диагональю ----------------------
+  if (/Острый угол ромба равен/i.test(text) && /меньшей диагональю/i.test(text)) {
+    const given = /Острый угол ромба равен (\d+(?:[.,]\d+)?)/i.exec(text);
+    if (given) {
+      const a0 = toNum(given[1]);
+      const value = a0 / 2;
+      return simple(
+        'rhombus-diagonal-angle',
+        value,
+        [
+          'Диагонали ромба делят его углы пополам.',
+          'Меньшая диагональ соединяет вершины острых углов, поэтому угол между стороной и этой диагональю равен половине острого угла ромба.',
+          `Угол = ${fmt(a0)}° / 2 = ${fmt(value)}°.`,
+        ],
+        [`${fmt(a0)}° / 2 = ${fmt(value)}°.`, `Ответ: ${fmt(value)}.`],
+      );
+    }
+  }
+
+  // --- касательные, проведённые из одной точки ------------------------------
+  if (/Касательные в точках A и B/i.test(text) && /Найдите угол ABO/i.test(text)) {
+    const given = /пересекаются под углом (\d+(?:[.,]\d+)?)/i.exec(text);
+    if (given) {
+      const p = toNum(given[1]);
+      const value = p / 2;
+      return simple(
+        'tangents-angle',
+        value,
+        [
+          'Радиус, проведённый в точку касания, перпендикулярен касательной.',
+          `В четырёхугольнике OAPB углы A и B прямые, поэтому ∠AOB = 180° − ${fmt(p)}° = ${fmt(180 - p)}°.`,
+          `Треугольник AOB равнобедренный (OA = OB), значит ∠ABO = (180° − ${fmt(180 - p)}°) / 2 = ${fmt(value)}°.`,
+        ],
+        [
+          `∠AOB = 180° − ${fmt(p)}° = ${fmt(180 - p)}°.`,
+          `∠ABO = (180° − ${fmt(180 - p)}°) / 2 = ${fmt(value)}°.`,
+          `Ответ: ${fmt(value)}.`,
+        ],
+      );
+    }
+  }
+
+  // --- ромб: диагональ и тангенс угла между диагональю и стороной ----------
+  if (/tg\s*BCA\s*=/i.test(text) && /Найдите площадь ромба/i.test(text)) {
+    const ac = /Диагональ AC ромба ABCD равна (\d+(?:[.,]\d+)?)/i.exec(text);
+    const tg = /tg\s*BCA\s*=\s*(\d+(?:[.,]\d+)?)/i.exec(text);
+    if (ac && tg) {
+      const d1 = toNum(ac[1]);
+      const t = toNum(tg[1]);
+      const value = (d1 * d1 * t) / 2;
+      return simple(
+        'rhombus-area-by-tangent',
+        value,
+        [
+          'Диагонали ромба перпендикулярны и делят друг друга пополам.',
+          `tg∠BCA = (BD/2) / (AC/2) = BD / AC, значит BD = AC · tg∠BCA = ${fmt(d1)} · ${fmt(t)} = ${fmt(round(d1 * t))}.`,
+          `S = (AC · BD) / 2 = (${fmt(d1)} · ${fmt(round(d1 * t))}) / 2 = ${fmt(round(value))}.`,
+        ],
+        [
+          `BD = ${fmt(d1)} · ${fmt(t)} = ${fmt(round(d1 * t))}.`,
+          `S = AC · BD / 2 = ${fmt(round(value))}.`,
+          `Ответ: ${fmt(round(value))}.`,
+        ],
+      );
+    }
+  }
+
+  // --- вписанный четырёхугольник: угол A -----------------------------------
+  if (/Угол A четырёхугольника/i.test(text) && /вписанного в окружность/i.test(text)) {
+    const given = /Угол A четырёхугольника[^.]*?равен (\d+(?:[.,]\d+)?)/i.exec(text);
+    const known = given ? toNum(given[1]) : a.get('A');
+    if (known != null) {
+      const value = 180 - known;
+      return simple(
+        'quad-inscribed-opposite',
+        value,
+        [
+          'У вписанного четырёхугольника сумма противоположных углов равна 180°.',
+          `∠A = ${fmt(known)}°.`,
+          `∠C = 180° − ${fmt(known)}° = ${fmt(value)}°.`,
+        ],
+        [`∠C = 180° − ${fmt(known)}° = ${fmt(value)}°.`, `Ответ: ${fmt(value)}.`],
       );
     }
   }
