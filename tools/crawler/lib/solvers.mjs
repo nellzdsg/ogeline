@@ -13,6 +13,7 @@ import { solvePaper, matchAnswer } from './paper.mjs';
 import { solveProducts } from './products.mjs';
 import { solveProgressions } from './progressions.mjs';
 import { solveProbability } from './probability.mjs';
+import { solveGeometry } from './geometry.mjs';
 import { inlinePictureText } from './pictures.mjs';
 
 const MAX_CANDIDATES = 8;
@@ -671,6 +672,18 @@ export function candidatesFor(task, context = {}) {
       }
     }
     if (outProgressions.length) return outProgressions;
+  }
+
+  // Геометрия (номера 15–19): углы, площади, окружность, трапеция, ромб.
+  const geometry = solveGeometry(text);
+  if (geometry) {
+    const outGeometry = [];
+    for (const value of geometry.values) {
+      for (const candidate of numberCandidates(value)) {
+        if (!outGeometry.includes(candidate)) outGeometry.push(candidate);
+      }
+    }
+    if (outGeometry.length) return outGeometry;
   }
 
   // Шины: ответ считается по маркировке; где заводская маркировка не дана,

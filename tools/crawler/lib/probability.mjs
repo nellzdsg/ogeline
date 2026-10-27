@@ -172,12 +172,26 @@ export function solveProbability(text) {
   if (ski) {
     const counts = { России: Number(ski[1]), Норвегии: Number(ski[2]), Швеции: Number(ski[3]) };
     const total = counts['России'] + counts['Норвегии'] + counts['Швеции'];
-    const asked = /стартовать спортсмен(?:ка)? из (\S+)/i.exec(t);
-    const country = asked && counts[asked[1]] != null ? asked[1] : 'России';
+    // Вопрос бывает трёх видов: «из Норвегии», «из Норвегии или Швеции»,
+    // «не из России». Поэтому собираем все названные страны и смотрим на «не».
+    const asked = /стартовать спортсмен(?:ка|ки)?\s+(не\s+)?из\s+([^.!?]+)/i.exec(t);
+    const negated = Boolean(asked && asked[1]);
+    const named = asked
+      ? [...asked[2].matchAll(/России|Норвегии|Швеции/gi)].map((m) => {
+          const word = m[0][0].toUpperCase() + m[0].slice(1).toLowerCase();
+          return word;
+        })
+      : [];
+    const countries = named.length ? [...new Set(named)] : ['России'];
+    let favourable = 0;
+    for (const [country, n] of Object.entries(counts)) {
+      const listed = countries.includes(country);
+      if (listed !== negated) favourable += n;
+    }
     return {
       type: 'prob-ski',
-      values: [ratio(counts[country], total)],
-      details: { counts, total, country },
+      values: [ratio(favourable, total), ratio(total - favourable, total)],
+      details: { counts, total, countries, negated, favourable },
     };
   }
 

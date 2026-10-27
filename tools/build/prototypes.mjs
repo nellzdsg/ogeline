@@ -32,6 +32,7 @@ import {
   parseIntervalSet,
 } from './expr.mjs';
 import { transcribedFormula } from '../crawler/lib/transcripts.mjs';
+import { inlinePictureText } from '../crawler/lib/pictures.mjs';
 import {
   solveTire,
   parseMarking,
@@ -43,6 +44,8 @@ import {
 import { solvePaper, matchAnswer, formatSize } from '../crawler/lib/paper.mjs';
 import { solveProducts } from '../crawler/lib/products.mjs';
 import { solveProgressions } from '../crawler/lib/progressions.mjs';
+import { solveProbability } from '../crawler/lib/probability.mjs';
+import { solveGeometry } from '../crawler/lib/geometry.mjs';
 import {
   analyzeFormula,
   evalExpr,
@@ -2242,6 +2245,7 @@ function solveProgressionsExplain(task, text) {
   }
 
   if (solved.type === 'arith-cooling') {
+    const sign = (v) => fmt(v).replace(/^-/, '−');
     return {
       prototype: 'progression-cooling',
       hints: [
@@ -2250,9 +2254,9 @@ function solveProgressionsExplain(task, text) {
         `За ${d.n} мин температура уменьшится на ${d.n} · ${fmt(d.drop)} = ${fmt(d.n * d.drop)} °C.`,
       ],
       steps: [
-        `Начальная температура ${fmt(d.start)} °C.`,
+        `Начальная температура ${sign(d.start)} °C.`,
         `За ${d.n} минут температура упадёт на ${d.n} · ${fmt(d.drop)} = ${fmt(d.n * d.drop)} °C.`,
-        `${fmt(d.start)} − ${fmt(d.n * d.drop)} = ${fmt(answer)} °C.`,
+        `${sign(d.start)} − ${fmt(d.n * d.drop)} = ${sign(answer)} °C.`,
         `Ответ: ${fmt(answer)}.`,
       ],
       answer: fmt(answer),
@@ -2262,8 +2266,284 @@ function solveProgressionsExplain(task, text) {
   return null;
 }
 
+// --- вероятность и статистика (номер 10) --------------------------------------
+
+/** Общая концовка решения: отношение благоприятных исходов к общему числу. */
+function probabilityTail(favourable, total, answer, what) {
+  return [
+    `Всего равновозможных исходов: ${total}${what ? ` (${what})` : ''}.`,
+    `Исходов, благоприятствующих событию: ${favourable}.`,
+    `Вероятность равна отношению числа благоприятных исходов к общему: ${favourable} / ${total} = ${fmt(answer)}.`,
+    `Ответ: ${fmt(answer)}.`,
+  ];
+}
+
+const pluralItems = (n, one, few, many) => plural(n, one, few, many);
+
+function solveProbabilityExplain(task, text) {
+  const solved = solveProbability(text);
+  if (!solved) return null;
+
+  const d = solved.details;
+  const answer = solved.values[0];
+  if (answer == null) return null;
+  const shown = fmt(answer);
+
+  if (solved.type === 'prob-puzzles') {
+    return {
+      prototype: 'probability-puzzles',
+      hints: [
+        'Подарки распределяются случайным образом, значит любой пазл может достаться Саше с одинаковой вероятностью.',
+        `Подходящих пазлов (${d.kind}) — ${d.favourable}, всего пазлов — ${d.total}.`,
+        'Вероятность — это отношение числа подходящих пазлов к общему числу пазлов.',
+      ],
+      steps: [
+        `Всего пазлов: ${d.total}, из них ${d.cities} с видами городов и ${d.cars} с машинами.`,
+        `Саше нужен пазл ${d.kind}, таких пазлов ${d.favourable}.`,
+        ...probabilityTail(d.favourable, d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-pen') {
+    return {
+      prototype: 'probability-complement',
+      hints: [
+        'События «ручка пишет плохо» и «ручка пишет хорошо» противоположны: одно из них произойдёт обязательно.',
+        'Сумма вероятностей противоположных событий равна 1.',
+        `Значит, вероятность того, что ручка пишет хорошо: 1 − ${fmt(d.bad)} = ${shown}.`,
+      ],
+      steps: [
+        `Вероятность того, что ручка пишет плохо, равна ${fmt(d.bad)}.`,
+        'Событие «ручка пишет хорошо» противоположно событию «ручка пишет плохо».',
+        `Вероятность противоположного события: 1 − ${fmt(d.bad)} = ${shown}.`,
+        `Ответ: ${shown}.`,
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-tickets') {
+    const learned = d.total - d.missed;
+    return {
+      prototype: 'probability-tickets',
+      hints: [
+        `Всего в наборе ${d.total} ${pluralItems(d.total, 'билет', 'билета', 'билетов')}, все они равновозможны.`,
+        `${d.name} не выучил ${d.missed}, значит выученных билетов ${learned}.`,
+        'Вероятность вытянуть выученный билет — это доля выученных билетов среди всех.',
+      ],
+      steps: [
+        `Всего билетов: ${d.total}.`,
+        `Не выучено ${d.missed}, значит выучено ${d.total} − ${d.missed} = ${learned}.`,
+        ...probabilityTail(learned, d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-ski') {
+    const list = d.countries.join(' или ');
+    const parts = Object.entries(d.counts)
+      .map(([c, n]) => `${n} из ${c}`)
+      .join(', ');
+    return {
+      prototype: 'probability-sport',
+      hints: [
+        'Порядок старта определяется жребием, поэтому любой из спортсменов может оказаться первым с равной вероятностью.',
+        `Всего спортсменов ${d.total}: ${parts}.`,
+        d.negated
+          ? `Нужны все, кто не из ${list}: таких ${d.favourable}.`
+          : `Нужны спортсмены из ${list}: их ${d.favourable}.`,
+      ],
+      steps: [
+        `Всего участников: ${parts}, итого ${d.total}.`,
+        d.negated
+          ? `Подходящих (не из ${list}) — ${d.favourable}.`
+          : `Подходящих (из ${list}) — ${d.favourable}.`,
+        ...probabilityTail(d.favourable, d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-cups') {
+    const wanted = d.wantRed ? 'красными цветами' : 'синими цветами';
+    return {
+      prototype: 'probability-cups',
+      hints: [
+        `Всего чашек ${d.total}, и любая из них может быть выбрана с равной вероятностью.`,
+        `Красных чашек ${d.red}, значит синих ${d.total} − ${d.red} = ${d.blue}.`,
+        `Нужна чашка с ${wanted}, таких чашек ${d.wantRed ? d.red : d.blue} из ${d.total}.`,
+      ],
+      steps: [
+        `Всего чашек: ${d.total}, из них ${d.red} с красными цветами.`,
+        `Остальные с синими цветами: ${d.total} − ${d.red} = ${d.blue}.`,
+        `Событие — чашка с ${wanted}.`,
+        ...probabilityTail(d.wantRed ? d.red : d.blue, d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-taxi') {
+    const counts = Object.entries(d.counts)
+      .map(([c, n]) => `${n} ${c}`)
+      .join(', ');
+    // «жёлтых» → «жёлтое»: в подсказке цвет стоит при слове «такси».
+    const adjective = d.color.replace(/ых$/, 'ое').replace(/их$/, 'ее');
+    return {
+      prototype: 'probability-taxi',
+      hints: [
+        `Свободно ${d.total} машин, и любая из них может приехать с равной вероятностью.`,
+        `Машины по цветам: ${counts}.`,
+        `Нужно ${adjective} такси: таких машин ${d.counts[d.color]}.`,
+      ],
+      steps: [
+        `Всего свободных машин: ${d.total} (${counts}).`,
+        `Подходящих машин: ${d.counts[d.color]}.`,
+        ...probabilityTail(d.counts[d.color], d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-pens') {
+    const wanted = d.names.join(' или ');
+    return {
+      prototype: 'probability-pens',
+      hints: [
+        `Всего ручек ${d.total}, каждая может быть выбрана с равной вероятностью.`,
+        `Красных, зелёных и фиолетовых вместе ${d.red + d.green + d.violet}, значит на синие и чёрные остаётся ${d.rest}, поровну — по ${d.rest / 2}.`,
+        `Нужны ручки ${wanted}: их ${d.sum} из ${d.total}.`,
+      ],
+      steps: [
+        `Всего ручек: ${d.total}.`,
+        `Известные цвета: ${d.red} красных, ${d.green} зелёных, ${d.violet} фиолетовых — всего ${d.red + d.green + d.violet}.`,
+        `Остальные синие и чёрные, их поровну: (${d.total} − ${d.red + d.green + d.violet}) / 2 = ${d.rest / 2} каждого цвета.`,
+        `Подходящих ручек (${wanted}): ${d.sum}.`,
+        ...probabilityTail(d.sum, d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-bulbs') {
+    const good = d.total - d.broken;
+    return {
+      prototype: 'probability-bulbs',
+      hints: [
+        `Речь идёт о доле фонариков среди ${d.total} штук, поэтому вероятность считается по средним данным.`,
+        `Неисправных ${d.broken}, значит исправных ${d.total} − ${d.broken} = ${good}.`,
+        d.wantBroken
+          ? `Нужен неисправный фонарик: ${d.broken} / ${d.total} = ${shown}.`
+          : `Нужен исправный фонарик: ${good} / ${d.total} = ${shown}.`,
+      ],
+      steps: [
+        `В среднем из ${d.total} фонариков ${d.broken} неисправных.`,
+        `Исправных: ${d.total} − ${d.broken} = ${good}.`,
+        ...probabilityTail(d.wantBroken ? d.broken : good, d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-dice') {
+    const sums = d.set.join(', ');
+    return {
+      prototype: 'probability-dice',
+      hints: [
+        `При ${d.times === 1 ? 'одном броске' : d.times + ' бросках'} кубика всего ${d.total} равновозможных исходов.`,
+        `Нужно перебрать исходы, у которых сумма очков равна ${sums}.`,
+        `Таких исходов ${d.favourable}, значит вероятность ${d.favourable} / ${d.total} = ${shown}.`,
+      ],
+      steps: [
+        `Каждый бросок даёт 6 вариантов, всего исходов: 6^${d.times} = ${d.total}.`,
+        `Подходят исходы с суммой ${sums} — их ${d.favourable}.`,
+        ...probabilityTail(d.favourable, d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-coin') {
+    const tails = d.total - d.heads;
+    return {
+      prototype: 'probability-coin',
+      hints: [
+        `Всего бросков ${d.total}, каждый из них равновозможен.`,
+        `Орлов выпало ${d.heads}, значит решек ${d.total} − ${d.heads} = ${tails}.`,
+        `Нужный бросок — один из всех, поэтому вероятность равна доле ${d.wantTails ? 'решек' : 'орлов'} среди всех бросков.`,
+      ],
+      steps: [
+        `Всего бросков: ${d.total}, из них орлов ${d.heads}, решек ${tails}.`,
+        'Конкретный по счёту бросок выбирается случайно среди всех бросков.',
+        ...probabilityTail(d.wantTails ? tails : d.heads, d.total, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-pencils') {
+    const first = d.firstGreen ? 'зелёным' : 'жёлтым';
+    const second = d.secondGreen ? 'зелёным' : 'жёлтым';
+    const secondGen = d.secondGreen ? 'зелёных' : 'жёлтых';
+    return {
+      prototype: 'probability-pencils',
+      hints: [
+        `Всего карандашей ${d.total}: ${d.yellow} жёлтых и ${d.green} зелёных.`,
+        `Первый карандаш уже достали, он оказался ${first}, поэтому в ящике осталось ${d.total - 1} карандашей.`,
+        `Второй тоже должен быть ${second}: подходящих карандашей осталось ${d.favourable}.`,
+      ],
+      steps: [
+        `Всего карандашей: ${d.yellow} + ${d.green} = ${d.total}.`,
+        `Первый карандаш оказался ${first}, после него осталось ${d.total - 1} карандашей.`,
+        `Подходящих (${secondGen}) среди них: ${d.favourable}.`,
+        ...probabilityTail(d.favourable, d.total - 1, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  if (solved.type === 'prob-markers') {
+    const wanted = d.wantBlack ? 'чёрный' : 'синий';
+    return {
+      prototype: 'probability-markers',
+      hints: [
+        `Всего маркеров ${d.black + d.blue}: ${d.black} чёрных и ${d.blue} синих.`,
+        'Берут один случайный маркер, значит все маркеры равновозможны.',
+        `Нужен ${wanted} маркер: таких ${d.wantBlack ? d.black : d.blue} из ${d.black + d.blue}.`,
+      ],
+      steps: [
+        `Всего маркеров: ${d.black} + ${d.blue} = ${d.black + d.blue}.`,
+        `Подходящих (${wanted}): ${d.wantBlack ? d.black : d.blue}.`,
+        ...probabilityTail(d.wantBlack ? d.black : d.blue, d.black + d.blue, answer),
+      ],
+      answer: shown,
+    };
+  }
+
+  return null;
+}
+
+// --- геометрия (номера 15–19) -------------------------------------------------
+
+/** Геометрические сюжеты: solver уже содержит и подсказки, и шаги. */
+function solveGeometryExplain(text) {
+  const solved = solveGeometry(text);
+  if (!solved) return null;
+  const answer = solved.values[0];
+  if (answer == null) return null;
+  return {
+    prototype: `geometry-${solved.type}`,
+    hints: solved.hints,
+    steps: solved.steps,
+    answer: fmt(answer),
+  };
+}
+
 export function describe(task) {
-  const text = fixNumberText(plainText(task.stem));
+  const text = fixNumberText(plainText(inlinePictureText(task.stem)));
   const kind = task.kind;
 
   if (kind === 'short') {
@@ -2279,9 +2559,22 @@ export function describe(task) {
     const products = solveProductsExplain(task, text);
     if (products) return products;
 
+    // Вероятность и статистика (номер 10).
+    const probability = solveProbabilityExplain(task, text);
+    if (probability) return probability;
+
     // Последовательности и прогрессии (номер 14).
     const progression = solveProgressionsExplain(task, text);
     if (progression) return progression;
+
+    // Геометрия (номера 15–19).
+    const geometry = solveGeometryExplain(text);
+    if (geometry) return geometry;
+
+    // Разбор геометрического задания, которого пока нет в списке сюжетов, нельзя
+    // подменять арифметикой из условия: ответ в геометрии — это не значение
+    // выражения из текста, а результат рассуждения.
+    if ((task.kes || []).some((k) => String(k).startsWith('7.'))) return genericOf(task);
 
     const { knowns, literals } = taskValues(task, text);
     const expr = formulas(task.stem).find((e) => !e.includes('='));
@@ -2349,6 +2642,11 @@ export function describe(task) {
     if (solved) return solved;
   }
 
+  return genericOf(task);
+}
+
+/** Заглушка для задания, которому ещё не написан разбор. */
+function genericOf(task) {
   return {
     prototype: 'generic',
     hints: [

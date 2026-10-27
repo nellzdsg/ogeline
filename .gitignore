@@ -8,3 +8,6 @@ web/media/
 data/*/debug-raw.html
 data/*/report-*.txt
 data/*/preview-*.txt
+
+data/*/readiness-*.txt
+data/*/probe.log
